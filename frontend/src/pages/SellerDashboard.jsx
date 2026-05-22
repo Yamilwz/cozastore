@@ -2,6 +2,7 @@ import { useContext, useEffect, useState } from 'react';
 import { AuthContext } from '../context/AuthContext';
 import productService from '../services/productService';
 import { Link } from 'react-router-dom';
+import { resolveImage } from '../utils/resolveImage';
 
 const SellerDashboard = () => {
   const { user, token } = useContext(AuthContext);
@@ -193,7 +194,7 @@ const SellerDashboard = () => {
                 </div>
 
                 <img 
-                  src={p.imageUrl || 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&q=80&w=800'} 
+                  src={resolveImage(p.imageUrl)} 
                   className="card-img-top" 
                   alt={p.name} 
                   style={{ height: '220px', objectFit: 'cover' }} 

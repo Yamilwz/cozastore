@@ -1,6 +1,7 @@
 import { useState, useEffect, useContext } from 'react';
 import { AuthContext } from '../context/AuthContext';
 import adminService from '../services/adminService';
+import { resolveImage } from '../utils/resolveImage';
 
 const AdminDashboard = () => {
   const { user, token } = useContext(AuthContext);
@@ -367,7 +368,7 @@ const AdminDashboard = () => {
                         <td className="px-4 py-3">
                           <div className="d-flex align-items-center gap-3">
                             <img 
-                              src={p.imageUrl || 'https://via.placeholder.com/60'} 
+                              src={resolveImage(p.imageUrl)} 
                               alt={p.name} 
                               className="rounded shadow-sm"
                               style={{ width: '50px', height: '50px', objectFit: 'cover' }} 

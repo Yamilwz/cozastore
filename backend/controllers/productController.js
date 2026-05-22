@@ -46,8 +46,8 @@ exports.getProducts = async (req, res) => {
 
     if (search) {
       where[Op.or] = [
-        { name: { [Op.like]: `%${search}%` } },
-        { description: { [Op.like]: `%${search}%` } }
+        { name: { [Op.iLike]: `%${search}%` } },
+        { description: { [Op.iLike]: `%${search}%` } }
       ];
     }
 
@@ -56,7 +56,7 @@ exports.getProducts = async (req, res) => {
     }
 
     if (location) {
-      where.location = { [Op.like]: `%${location}%` };
+      where.location = { [Op.iLike]: `%${location}%` };
     }
 
     if (sellerId) {
@@ -89,11 +89,38 @@ exports.getProducts = async (req, res) => {
       ]
     });
 
-    res.json(products);
+    // Batch-load seller reputation to avoid N+1 queries
+    const sellerIds = [...new Set(products.map(p => p.sellerId).filter(Boolean))];
+    const reviewMap = {};
+    if (sellerIds.length > 0) {
+      const allReviews = await SellerReview.findAll({
+        where: { sellerId: sellerIds }
+      });
+      for (const sellerId of sellerIds) {
+        const reviews = allReviews.filter(r => r.sellerId === sellerId);
+        const avg = reviews.length > 0
+          ? parseFloat((reviews.reduce((a, r) => a + r.rating, 0) / reviews.length).toFixed(1))
+          : 0;
+        reviewMap[sellerId] = { avgRating: avg, reviewsCount: reviews.length };
+      }
+    }
+
+    // Attach reputation to each product's seller
+    const enriched = products.map(p => {
+      const plain = p.toJSON();
+      if (plain.seller && reviewMap[plain.sellerId]) {
+        plain.seller.avgRating = reviewMap[plain.sellerId].avgRating;
+        plain.seller.reviewsCount = reviewMap[plain.sellerId].reviewsCount;
+      }
+      return plain;
+    });
+
+    res.json(enriched);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 };
+
 
 // @desc    Obtener un producto por ID con detalles del vendedor y su reputación
 // @route   GET /api/products/:id

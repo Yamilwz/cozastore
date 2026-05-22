@@ -1,5 +1,11 @@
 const { Sequelize } = require('sequelize');
 const path = require('path');
+const dns = require('dns');
+
+// Fuerza la resolución de nombres DNS a IPv4 primero (evita errores ENETUNREACH de IPv6 en Render)
+if (typeof dns.setDefaultResultOrder === 'function') {
+  dns.setDefaultResultOrder('ipv4first');
+}
 
 let sequelize;
 

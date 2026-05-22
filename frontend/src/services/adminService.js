@@ -11,21 +11,21 @@ const getUsers = async (token) => {
 };
 
 const createUser = async (userData, token) => {
-  const response = await axios.post(`${API_URL}/users`, userData, {
+  const response = await axios.post(`${API_URL}/admin/users`, userData, {
     headers: { Authorization: `Bearer ${token}` }
   });
   return response.data;
 };
 
 const updateUser = async (id, userData, token) => {
-  const response = await axios.put(`${API_URL}/users/${id}`, userData, {
+  const response = await axios.put(`${API_URL}/admin/users/${id}`, userData, {
     headers: { Authorization: `Bearer ${token}` }
   });
   return response.data;
 };
 
 const deleteUser = async (id, token) => {
-  await axios.delete(`${API_URL}/users/${id}`, {
+  await axios.delete(`${API_URL}/admin/users/${id}`, {
     headers: { Authorization: `Bearer ${token}` }
   });
 };

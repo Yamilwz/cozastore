@@ -1,11 +1,4 @@
 const { Sequelize } = require('sequelize');
-const path = require('path');
-const dns = require('dns');
-
-// Fuerza la resolución de nombres DNS a IPv4 primero (evita errores ENETUNREACH de IPv6 en Render)
-if (typeof dns.setDefaultResultOrder === 'function') {
-  dns.setDefaultResultOrder('ipv4first');
-}
 
 let sequelize;
 
@@ -15,18 +8,24 @@ if (process.env.NODE_ENV === 'test') {
     storage: ':memory:',
     logging: false
   });
+} else if (process.env.DATABASE_URL) {
+  // Producción: usar connection string del pooler de Supabase (tiene IPv4)
+  sequelize = new Sequelize(process.env.DATABASE_URL, {
+    dialect: 'postgres',
+    logging: false,
+    dialectOptions: {
+      ssl: { require: true, rejectUnauthorized: false }
+    }
+  });
 } else {
+  // Desarrollo local: variables individuales
   sequelize = new Sequelize(process.env.DB_NAME, process.env.DB_USER, process.env.DB_PASSWORD, {
     host: process.env.DB_HOST,
     port: process.env.DB_PORT || 5432,
     dialect: 'postgres',
     logging: false,
     dialectOptions: {
-      ssl: {
-        require: true,
-        rejectUnauthorized: false
-      },
-      family: 4  // Fuerza la resolución a IPv4 (evita fallos de IPv6 en entornos como Render)
+      ssl: { require: true, rejectUnauthorized: false }
     }
   });
 }

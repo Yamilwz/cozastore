@@ -8,13 +8,14 @@ const Register = () => {
     email: '',
     password: '',
     passwordConfirm: '',
+    role: 'comprador',
   });
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const { register } = useContext(AuthContext);
   const navigate = useNavigate();
 
-  const { name, email, password, passwordConfirm } = formData;
+  const { name, email, password, passwordConfirm, role } = formData;
 
   const onChange = (e) =>
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -98,6 +99,20 @@ const Register = () => {
               required
               placeholder="Repite tu contraseña"
             />
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Tipo de Cuenta</label>
+            <select
+              className="form-input"
+              name="role"
+              value={role}
+              onChange={onChange}
+              style={{ padding: '0.6rem', border: '1px solid #ddd', borderRadius: '4px', background: '#fff' }}
+            >
+              <option value="comprador">Demandante (Comprar productos/servicios)</option>
+              <option value="vendedor">Ofertante (Publicar productos/servicios)</option>
+            </select>
           </div>
 
           <button type="submit" className="btn-primary">

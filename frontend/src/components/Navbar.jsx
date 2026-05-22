@@ -19,11 +19,18 @@ const Navbar = () => {
 
       <ul className="nav-links">
         <li>
-          <Link to="/" className="nav-link">Inicio</Link>
+          <Link to="/" className="nav-link">Inicio (Marketplace)</Link>
         </li>
-        <li>
-          <Link to="/products" className="nav-link">Productos</Link>
-        </li>
+        {user && (user.role === 'vendedor' || user.role === 'admin') && (
+          <li>
+            <Link to="/publish" className="nav-link" style={{ color: 'var(--primary)', fontWeight: '600' }}>Publicar Producto</Link>
+          </li>
+        )}
+        {user && (
+          <li>
+            <Link to="/chat" className="nav-link">💬 Mensajes</Link>
+          </li>
+        )}
         {user && user.role === 'admin' && (
           <li>
             <Link to="/admin" className="nav-link admin-link" style={{ color: '#ff4d4d', fontWeight: 'bold' }}>Admin</Link>
@@ -41,7 +48,7 @@ const Navbar = () => {
         ) : (
           <>
             <li>
-              <Link to="/login" className="nav-link">Login</Link>
+              <Link to="/login" className="nav-link">Iniciar Sesión</Link>
             </li>
             <li>
               <Link to="/register" className="nav-link">Registro</Link>

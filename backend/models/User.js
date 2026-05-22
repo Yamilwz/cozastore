@@ -34,8 +34,22 @@ const User = sequelize.define('User', {
     }
   },
   role: {
-    type: DataTypes.ENUM('cliente', 'admin'),
-    defaultValue: 'cliente'
+    type: DataTypes.ENUM('admin', 'vendedor', 'comprador'),
+    defaultValue: 'comprador'
+  },
+  avatarUrl: {
+    type: DataTypes.STRING,
+    allowNull: true,
+    defaultValue: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?ixlib=rb-1.2.1&auto=format&fit=crop&w=150&q=80' // default avatar
+  },
+  bio: {
+    type: DataTypes.TEXT,
+    allowNull: true
+  },
+  location: {
+    type: DataTypes.STRING,
+    allowNull: true,
+    defaultValue: 'No especificada'
   }
 }, {
   hooks: {

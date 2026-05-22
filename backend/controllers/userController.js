@@ -13,6 +13,9 @@ exports.getUserProfile = async (req, res) => {
         name: user.name,
         email: user.email,
         role: user.role,
+        avatarUrl: user.avatarUrl,
+        bio: user.bio,
+        location: user.location,
         createdAt: user.createdAt,
       },
     });
@@ -29,6 +32,9 @@ exports.updateUserProfile = async (req, res) => {
 
   if (user) {
     user.name = req.body.name || user.name;
+    user.bio = req.body.bio !== undefined ? req.body.bio : user.bio;
+    user.location = req.body.location !== undefined ? req.body.location : user.location;
+    user.avatarUrl = req.body.avatarUrl || user.avatarUrl;
     
     if (req.body.email && req.body.email !== user.email) {
       const emailExists = await User.findOne({ where: { email: req.body.email } });
@@ -46,6 +52,9 @@ exports.updateUserProfile = async (req, res) => {
         name: updatedUser.name,
         email: updatedUser.email,
         role: updatedUser.role,
+        avatarUrl: updatedUser.avatarUrl,
+        bio: updatedUser.bio,
+        location: updatedUser.location,
         createdAt: updatedUser.createdAt,
       },
     });

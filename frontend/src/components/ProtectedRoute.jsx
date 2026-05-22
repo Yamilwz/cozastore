@@ -2,7 +2,7 @@ import { useContext } from 'react';
 import { Navigate, Outlet } from 'react-router-dom';
 import { AuthContext } from '../context/AuthContext';
 
-const ProtectedRoute = ({ adminOnly = false }) => {
+const ProtectedRoute = ({ adminOnly = false, sellerOnly = false }) => {
   const { token, user, loading } = useContext(AuthContext);
 
   if (loading) return <div>Cargando...</div>;
@@ -10,6 +10,10 @@ const ProtectedRoute = ({ adminOnly = false }) => {
   if (!token) return <Navigate to="/login" />;
 
   if (adminOnly && user?.role !== 'admin') {
+    return <Navigate to="/" />;
+  }
+
+  if (sellerOnly && user?.role !== 'vendedor' && user?.role !== 'admin') {
     return <Navigate to="/" />;
   }
 

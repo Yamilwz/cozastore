@@ -1,3 +1,6 @@
+// Forzar IPv4 en DNS antes de cualquier otro módulo (evita ENETUNREACH IPv6 en Render)
+require('dns').setDefaultResultOrder('ipv4first');
+
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');

@@ -49,6 +49,7 @@ backend/controllers/productController.js
 backend/controllers/userController.js
 backend/create_users.js
 backend/database.sqlite
+backend/init_db_supabase.sql
 backend/init_db.sql
 backend/middleware/upload.js
 backend/middlewares/adminMiddleware.js
@@ -73,6 +74,7 @@ frontend/package.json
 frontend/src/App.jsx
 frontend/src/components/Navbar.jsx
 frontend/src/components/ProtectedRoute.jsx
+frontend/src/config/api.js
 frontend/src/context/AuthContext.jsx
 frontend/src/index.css
 frontend/src/main.jsx
@@ -91,6 +93,7 @@ frontend/src/services/authService.js
 frontend/src/services/messageService.js
 frontend/src/services/productService.js
 frontend/src/services/userService.js
+frontend/src/utils/resolveImage.js
 frontend/vite.config.js
 README.md
 </directory_structure>
@@ -247,6 +250,94 @@ exports.getMessagesBetweenUsers = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+</file>
+
+<file path="backend/init_db_supabase.sql">
+/*
+  PostgreSQL initialization script for CozaStore application.
+  Compatible with Supabase SQL Editor.
+  
+  NOTE: Sequelize will create these tables automatically via sync({ alter: true }).
+  This script is only needed if you want to pre-create tables manually.
+*/
+
+-- Drop tables if they exist (in reverse dependency order)
+DROP TABLE IF EXISTS "Messages" CASCADE;
+DROP TABLE IF EXISTS "SellerReviews" CASCADE;
+DROP TABLE IF EXISTS "Products" CASCADE;
+DROP TABLE IF EXISTS "Users" CASCADE;
+
+-- Drop enum types if they exist
+DROP TYPE IF EXISTS "enum_Users_role" CASCADE;
+DROP TYPE IF EXISTS "enum_Products_status" CASCADE;
+DROP TYPE IF EXISTS "enum_Products_approvalStatus" CASCADE;
+
+-- Create enum types
+CREATE TYPE "enum_Users_role" AS ENUM ('admin', 'vendedor', 'comprador');
+CREATE TYPE "enum_Products_status" AS ENUM ('nuevo', 'usado');
+CREATE TYPE "enum_Products_approvalStatus" AS ENUM ('pendiente', 'aprobado', 'rechazado');
+
+-- Users table
+CREATE TABLE "Users" (
+  id SERIAL PRIMARY KEY,
+  name VARCHAR(255) NOT NULL,
+  email VARCHAR(255) NOT NULL UNIQUE,
+  password VARCHAR(255) NOT NULL,
+  role "enum_Users_role" NOT NULL DEFAULT 'comprador',
+  "avatarUrl" VARCHAR(255) DEFAULT 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?ixlib=rb-1.2.1&auto=format&fit=crop&w=150&q=80',
+  bio TEXT,
+  location VARCHAR(255) DEFAULT 'No especificada',
+  "createdAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+  "updatedAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+-- Products table
+CREATE TABLE "Products" (
+  id SERIAL PRIMARY KEY,
+  name VARCHAR(255) NOT NULL,
+  description TEXT,
+  price FLOAT NOT NULL,
+  category VARCHAR(255),
+  "imageUrl" VARCHAR(255),
+  images TEXT,
+  stock INTEGER DEFAULT 1,
+  "sellerId" INTEGER NOT NULL REFERENCES "Users"(id) ON DELETE CASCADE,
+  status "enum_Products_status" DEFAULT 'nuevo',
+  "approvalStatus" "enum_Products_approvalStatus" NOT NULL DEFAULT 'pendiente',
+  location VARCHAR(255) DEFAULT 'No especificada',
+  "createdAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+  "updatedAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+-- SellerReviews table
+CREATE TABLE "SellerReviews" (
+  id SERIAL PRIMARY KEY,
+  "sellerId" INTEGER NOT NULL REFERENCES "Users"(id) ON DELETE CASCADE,
+  "buyerId" INTEGER NOT NULL REFERENCES "Users"(id) ON DELETE CASCADE,
+  rating INTEGER NOT NULL CHECK (rating >= 1 AND rating <= 5),
+  comment TEXT,
+  "createdAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+  "updatedAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+-- Messages table
+CREATE TABLE "Messages" (
+  id SERIAL PRIMARY KEY,
+  "senderId" INTEGER NOT NULL REFERENCES "Users"(id) ON DELETE CASCADE,
+  "receiverId" INTEGER NOT NULL REFERENCES "Users"(id) ON DELETE CASCADE,
+  "productId" INTEGER REFERENCES "Products"(id) ON DELETE CASCADE,
+  message TEXT NOT NULL,
+  "isRead" BOOLEAN DEFAULT FALSE,
+  "createdAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+  "updatedAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+-- Create indexes for performance
+CREATE INDEX idx_products_seller ON "Products"("sellerId");
+CREATE INDEX idx_products_approval ON "Products"("approvalStatus");
+CREATE INDEX idx_reviews_seller ON "SellerReviews"("sellerId");
+CREATE INDEX idx_messages_sender ON "Messages"("senderId");
+CREATE INDEX idx_messages_receiver ON "Messages"("receiverId");
 </file>
 
 <file path="backend/init_db.sql">
@@ -861,6 +952,12 @@ describe('Especificaciones de Gestión de Productos y Servicios (Sprint 2)', () 
 }
 </file>
 
+<file path="frontend/src/config/api.js">
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+
+export default API_BASE;
+</file>
+
 <file path="frontend/src/context/AuthContext.jsx">
 import { createContext, useState, useEffect } from 'react';
 import authService from '../services/authService';
@@ -1157,331 +1254,6 @@ const Login = () => {
 };
 
 export default Login;
-</file>
-
-<file path="frontend/src/pages/Products.jsx">
-import { useState, useEffect, useRef } from 'react';
-import productService from '../services/productService';
-
-
-// Resolve image URL — works for both external URLs and local /uploads/... paths
-const resolveImage = (url) => {
-  if (!url) return 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?auto=format&fit=crop&q=80&w=800';
-  if (url.startsWith('http')) return url;
-  return url; // Vite proxy forwards /uploads → localhost:5000/uploads
-};
-
-// Star rating component
-const Stars = ({ rating, count }) => {
-  const full = Math.floor(rating);
-  const half = rating - full >= 0.5;
-  return (
-    <span className="d-flex align-items-center gap-1" style={{ fontSize: '0.78rem' }}>
-      {[1, 2, 3, 4, 5].map(i => (
-        <span key={i} style={{ color: i <= full ? '#f59e0b' : (i === full + 1 && half ? '#f59e0b' : '#d1d5db'), fontSize: '0.85rem' }}>
-          {i <= full ? '★' : (i === full + 1 && half ? '⯨' : '☆')}
-        </span>
-      ))}
-      <span className="text-muted ms-1">{rating > 0 ? `${rating} (${count})` : 'Sin reseñas'}</span>
-    </span>
-  );
-};
-
-// ── Cart sidebar component ──────────────────────────────────────────────────
-const CartSidebar = ({ cart, onRemove, onClose, visible }) => {
-  const total = cart.reduce((acc, item) => acc + item.price * (item.qty || 1), 0);
-
-  return (
-    <>
-      {/* Backdrop */}
-      {visible && (
-        <div
-          onClick={onClose}
-          style={{
-            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)',
-            zIndex: 1040, backdropFilter: 'blur(3px)'
-          }}
-        />
-      )}
-      {/* Drawer */}
-      <div style={{
-        position: 'fixed', top: 0, right: 0, height: '100vh', width: '380px',
-        maxWidth: '95vw', background: '#fff', zIndex: 1050,
-        transform: visible ? 'translateX(0)' : 'translateX(110%)',
-        transition: 'transform 0.35s cubic-bezier(.4,0,.2,1)',
-        boxShadow: '-4px 0 30px rgba(0,0,0,0.15)',
-        display: 'flex', flexDirection: 'column'
-      }}>
-        {/* Header */}
-        <div className="p-4 border-bottom d-flex justify-content-between align-items-center bg-dark text-white">
-          <h5 className="mb-0 fw-bold">🛒 Mi Carrito <span className="badge bg-primary ms-2">{cart.length}</span></h5>
-          <button className="btn btn-sm btn-outline-light" onClick={onClose}>✕</button>
-        </div>
-
-        {/* Items */}
-        <div className="flex-grow-1 overflow-auto p-3">
-          {cart.length === 0 ? (
-            <div className="text-center py-5 text-muted">
-              <span style={{ fontSize: '3rem' }}>🛒</span>
-              <p className="mt-3">Tu carrito está vacío</p>
-            </div>
-          ) : (
-            cart.map((item) => (
-              <div key={item.cartId} className="d-flex align-items-center gap-3 mb-3 p-2 rounded-3 bg-light border">
-                <img
-                  src={resolveImage(item.imageUrl)}
-                  alt={item.name}
-                  style={{ width: '60px', height: '60px', objectFit: 'cover', borderRadius: '8px', flexShrink: 0 }}
-                />
-                <div className="flex-grow-1 min-width-0">
-                  <div className="fw-semibold text-truncate" style={{ maxWidth: '200px' }}>{item.name}</div>
-                  <div className="small text-muted">{item.seller?.name || 'Ofertante'}</div>
-                  <div className="fw-bold text-primary">${item.price.toFixed(2)}</div>
-                </div>
-                <button
-                  className="btn btn-sm btn-outline-danger flex-shrink-0"
-                  onClick={() => onRemove(item.cartId)}
-                >✕</button>
-              </div>
-            ))
-          )}
-        </div>
-
-        {/* Footer total */}
-        {cart.length > 0 && (
-          <div className="p-4 border-top bg-light">
-            <div className="d-flex justify-content-between mb-3">
-              <span className="fw-semibold">Total ({cart.length} item{cart.length !== 1 ? 's' : ''})</span>
-              <span className="fw-bold h5 text-primary mb-0">${total.toFixed(2)}</span>
-            </div>
-            <button className="btn btn-primary w-100 fw-bold py-2">
-              Proceder al Pago →
-            </button>
-          </div>
-        )}
-      </div>
-    </>
-  );
-};
-
-// ── Main Products page ──────────────────────────────────────────────────────
-const Products = () => {
-  const [products, setProducts] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [cart, setCart] = useState([]);
-  const [cartOpen, setCartOpen] = useState(false);
-  const [addedId, setAddedId] = useState(null); // track which product just got added
-  const [search, setSearch] = useState('');
-  const [categoryFilter, setCategoryFilter] = useState('Todos');
-  const addedTimerRef = useRef(null);
-
-  const CATEGORIES = ['Todos', 'Ropa', 'Calzado', 'Accesorios', 'Tecnología', 'Servicios', 'General'];
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const data = await productService.getProducts();
-        setProducts(data);
-      } catch (err) {
-        console.error('Error al cargar productos', err);
-      } finally {
-        setLoading(false);
-      }
-    })();
-
-    const savedCart = JSON.parse(localStorage.getItem('cart')) || [];
-    setCart(savedCart);
-  }, []);
-
-  const addToCart = (product) => {
-    const newCart = [...cart, { ...product, cartId: Date.now(), qty: 1 }];
-    setCart(newCart);
-    localStorage.setItem('cart', JSON.stringify(newCart));
-
-    // Brief "added" animation on the button
-    setAddedId(product.id);
-    clearTimeout(addedTimerRef.current);
-    addedTimerRef.current = setTimeout(() => setAddedId(null), 1500);
-
-    // Open cart sidebar after short delay
-    setTimeout(() => setCartOpen(true), 200);
-  };
-
-  const removeFromCart = (cartId) => {
-    const newCart = cart.filter(i => i.cartId !== cartId);
-    setCart(newCart);
-    localStorage.setItem('cart', JSON.stringify(newCart));
-  };
-
-  // Filtering
-  const visible = products.filter(p => {
-    const matchSearch = p.name.toLowerCase().includes(search.toLowerCase()) ||
-      (p.description || '').toLowerCase().includes(search.toLowerCase());
-    const matchCat = categoryFilter === 'Todos' || p.category === categoryFilter;
-    return matchSearch && matchCat;
-  });
-
-  if (loading) return (
-    <div className="container mt-5 py-5 text-center">
-      <div className="spinner-border text-primary" role="status"></div>
-      <p className="mt-3 text-muted">Cargando catálogo...</p>
-    </div>
-  );
-
-  return (
-    <>
-      <CartSidebar
-        cart={cart}
-        onRemove={removeFromCart}
-        onClose={() => setCartOpen(false)}
-        visible={cartOpen}
-      />
-
-      <div className="container mt-5 pb-5">
-        {/* Header */}
-        <div className="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-4">
-          <div>
-            <h2 className="fw-bold mb-1">Catálogo de Productos</h2>
-            <p className="text-muted mb-0">{visible.length} oferta{visible.length !== 1 ? 's' : ''} disponible{visible.length !== 1 ? 's' : ''}</p>
-          </div>
-          {/* Cart button */}
-          <button
-            className="btn btn-dark fw-semibold d-flex align-items-center gap-2 position-relative px-4"
-            onClick={() => setCartOpen(true)}
-          >
-            🛒 Ver Carrito
-            {cart.length > 0 && (
-              <span className="badge bg-primary rounded-pill">{cart.length}</span>
-            )}
-          </button>
-        </div>
-
-        {/* Search + Category Filters */}
-        <div className="row g-3 mb-4">
-          <div className="col-md-7">
-            <input
-              type="text"
-              className="form-control py-2 shadow-sm"
-              placeholder="🔍  Buscar productos o servicios..."
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-            />
-          </div>
-          <div className="col-md-5">
-            <div className="d-flex gap-2 flex-wrap">
-              {CATEGORIES.map(cat => (
-                <button
-                  key={cat}
-                  onClick={() => setCategoryFilter(cat)}
-                  className={`btn btn-sm fw-semibold px-3 ${categoryFilter === cat ? 'btn-dark' : 'btn-outline-secondary'}`}
-                  style={{ borderRadius: '20px' }}
-                >
-                  {cat}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* Product Grid */}
-        {visible.length === 0 ? (
-          <div className="text-center py-5 text-muted">
-            <span style={{ fontSize: '3rem' }}>🔎</span>
-            <h5 className="mt-3">No se encontraron productos</h5>
-          </div>
-        ) : (
-          <div className="row g-4">
-            {visible.map((p) => {
-              const isAdded = addedId === p.id;
-              const avgRating = p.seller?.avgRating || 0;
-              const reviewCount = p.seller?.reviewsCount || 0;
-
-              return (
-                <div key={p.id} className="col-sm-6 col-lg-4 col-xl-3">
-                  <div
-                    className="card h-100 border-0 shadow-sm product-card"
-                    style={{ borderRadius: '14px', overflow: 'hidden', transition: 'transform .2s, box-shadow .2s' }}
-                    onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-4px)'; e.currentTarget.style.boxShadow = '0 12px 32px rgba(0,0,0,0.12)'; }}
-                    onMouseLeave={e => { e.currentTarget.style.transform = ''; e.currentTarget.style.boxShadow = ''; }}
-                  >
-                    {/* Product image */}
-                    <div style={{ position: 'relative' }}>
-                      <img
-                        src={resolveImage(p.imageUrl)}
-                        className="card-img-top"
-                        alt={p.name}
-                        style={{ height: '200px', objectFit: 'cover' }}
-                        onError={e => { e.target.src = 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?auto=format&fit=crop&q=80&w=800'; }}
-                      />
-                      {/* Category badge */}
-                      <span
-                        className="badge bg-dark text-white px-2 py-1"
-                        style={{ position: 'absolute', bottom: '8px', left: '8px', fontSize: '0.7rem', borderRadius: '8px', opacity: 0.85 }}
-                      >
-                        {p.category}
-                      </span>
-                    </div>
-
-                    <div className="card-body d-flex flex-column p-3">
-                      {/* Product name & description */}
-                      <h6 className="card-title fw-bold text-dark mb-1 text-truncate" title={p.name}>{p.name}</h6>
-                      <p className="card-text text-muted small mb-2" style={{
-                        display: '-webkit-box', WebkitLineClamp: 2,
-                        WebkitBoxOrient: 'vertical', overflow: 'hidden'
-                      }}>
-                        {p.description}
-                      </p>
-
-                      {/* ── Seller info block ── */}
-                      {p.seller && (
-                        <div className="d-flex align-items-center gap-2 mb-2 p-2 rounded-2" style={{ background: '#f8f9fa' }}>
-                          <img
-                            src={resolveImage(p.seller.avatarUrl)}
-                            alt={p.seller.name}
-                            style={{ width: '32px', height: '32px', borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }}
-                            onError={e => { e.target.src = 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=80&q=80'; }}
-                          />
-                          <div style={{ minWidth: 0 }}>
-                            <div className="fw-semibold text-dark text-truncate" style={{ fontSize: '0.8rem' }}>
-                              {p.seller.name}
-                            </div>
-                            <Stars rating={avgRating} count={reviewCount} />
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Price + Location */}
-                      <div className="mt-auto">
-                        <div className="d-flex justify-content-between align-items-center mb-1">
-                          <span className="fw-bold text-primary" style={{ fontSize: '1.15rem' }}>${p.price.toFixed(2)}</span>
-                          {p.location && (
-                            <span className="text-muted" style={{ fontSize: '0.72rem' }}>📍 {p.location}</span>
-                          )}
-                        </div>
-
-                        {/* Add to cart button */}
-                        <button
-                          className={`btn w-100 fw-semibold py-2 ${isAdded ? 'btn-success' : 'btn-dark'}`}
-                          style={{ borderRadius: '10px', transition: 'background .3s, transform .1s' }}
-                          onClick={() => addToCart(p)}
-                          disabled={isAdded}
-                        >
-                          {isAdded ? '✓ Agregado' : '🛒 Agregar al carrito'}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    </>
-  );
-};
-
-export default Products;
 </file>
 
 <file path="frontend/src/pages/Profile.jsx">
@@ -1863,478 +1635,13 @@ const PublishProduct = () => {
 export default PublishProduct;
 </file>
 
-<file path="frontend/src/pages/SellerDashboard.jsx">
-import { useContext, useEffect, useState } from 'react';
-import { AuthContext } from '../context/AuthContext';
-import productService from '../services/productService';
-import { Link } from 'react-router-dom';
-
-const SellerDashboard = () => {
-  const { user, token } = useContext(AuthContext);
-  const [myProducts, setMyProducts] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-
-  // Edit Modal State
-  const [showEditModal, setShowEditModal] = useState(false);
-  const [selectedProduct, setSelectedProduct] = useState(null);
-  const [editForm, setEditForm] = useState({
-    name: '',
-    description: '',
-    price: '',
-    category: '',
-    stock: '',
-    location: ''
-  });
-  const [saveLoading, setSaveLoading] = useState(false);
-
-  const fetchMyProducts = async () => {
-    try {
-      setLoading(true);
-      const allProducts = await productService.getProducts(token);
-      // Filter products belonging to this seller
-      const filtered = allProducts.filter(p => p.sellerId === user?.id);
-      setMyProducts(filtered);
-    } catch (err) {
-      console.error('Error loading seller products', err);
-      setError('No se pudieron cargar tus ofertas.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    if (user && token) {
-      fetchMyProducts();
-    }
-  }, [user, token]);
-
-  const handleDelete = async (id) => {
-    if (window.confirm('¿Estás seguro de que deseas eliminar este producto/servicio permanentemente?')) {
-      try {
-        await productService.deleteProduct(id, token);
-        setMyProducts(myProducts.filter(p => p.id !== id));
-        alert('Producto eliminado correctamente.');
-      } catch (err) {
-        alert(err.response?.data?.error || 'Error al eliminar el producto');
-      }
-    }
-  };
-
-  const handleOpenEdit = (product) => {
-    setSelectedProduct(product);
-    setEditForm({
-      name: product.name,
-      description: product.description || '',
-      price: product.price,
-      category: product.category || 'General',
-      stock: product.stock,
-      location: product.location || ''
-    });
-    setShowEditModal(true);
-  };
-
-  const handleEditChange = (e) => {
-    setEditForm({ ...editForm, [e.target.name]: e.target.value });
-  };
-
-  const handleSaveEdit = async (e) => {
-    e.preventDefault();
-    setSaveLoading(true);
-    try {
-      const updatedData = {
-        name: editForm.name,
-        description: editForm.description,
-        price: parseFloat(editForm.price),
-        category: editForm.category,
-        stock: parseInt(editForm.stock, 10),
-        location: editForm.location
-      };
-
-      await productService.updateProduct(selectedProduct.id, updatedData, token);
-      
-      // Reload products
-      await fetchMyProducts();
-      setShowEditModal(false);
-      alert('Cambios guardados con éxito.');
-    } catch (err) {
-      alert(err.response?.data?.error || 'Error al actualizar el producto');
-    } finally {
-      setSaveLoading(false);
-    }
-  };
-
-  // Badges helper
-  const getStatusBadge = (status) => {
-    switch (status) {
-      case 'pendiente':
-        return <span className="badge bg-warning text-dark px-3 py-2 shadow-sm rounded-pill">⏳ Pendiente</span>;
-      case 'aprobado':
-        return <span className="badge bg-success px-3 py-2 shadow-sm rounded-pill">✓ Aprobado</span>;
-      case 'rechazado':
-        return <span className="badge bg-danger px-3 py-2 shadow-sm rounded-pill">✗ Rechazado</span>;
-      default:
-        return <span className="badge bg-secondary px-3 py-2 shadow-sm rounded-pill">{status}</span>;
-    }
-  };
-
-  if (loading) {
-    return (
-      <div className="container mt-5 py-5 text-center">
-        <div className="spinner-border text-primary" role="status">
-          <span className="visually-hidden">Cargando...</span>
-        </div>
-        <p className="mt-3 text-muted">Cargando tu inventario de ofertas...</p>
-      </div>
-    );
-  }
-
-  // Count summaries
-  const pendingCount = myProducts.filter(p => p.approvalStatus === 'pendiente').length;
-  const approvedCount = myProducts.filter(p => p.approvalStatus === 'aprobado').length;
-  const rejectedCount = myProducts.filter(p => p.approvalStatus === 'rechazado').length;
-
-  return (
-    <div className="container mt-5 pb-5">
-      {/* Header and Publish button */}
-      <div className="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-5">
-        <div>
-          <h2 className="fw-bold mb-1 text-dark">Mi Catálogo de Ofertas</h2>
-          <p className="text-muted mb-0">Gestiona y publica tus productos o servicios en la plataforma</p>
-        </div>
-        <Link to="/publish" className="btn btn-primary btn-lg fw-bold px-4 shadow">
-          + Publicar Nuevo
-        </Link>
-      </div>
-
-      {error && <div className="alert alert-danger border-0 shadow-sm mb-4">{error}</div>}
-
-      {/* Summary Stats Cards */}
-      <div className="row g-3 mb-5">
-        <div className="col-6 col-md-3">
-          <div className="card shadow-sm border-0 rounded-3 p-3 text-center bg-light">
-            <span className="display-6 fw-bold text-dark d-block">{myProducts.length}</span>
-            <span className="small text-muted fw-semibold">Total Ofertas</span>
-          </div>
-        </div>
-        <div className="col-6 col-md-3">
-          <div className="card shadow-sm border-0 rounded-3 p-3 text-center bg-success-subtle text-success-emphasis">
-            <span className="display-6 fw-bold d-block">{approvedCount}</span>
-            <span className="small fw-semibold">Aprobadas</span>
-          </div>
-        </div>
-        <div className="col-6 col-md-3">
-          <div className="card shadow-sm border-0 rounded-3 p-3 text-center bg-warning-subtle text-warning-emphasis">
-            <span className="display-6 fw-bold d-block">{pendingCount}</span>
-            <span className="small fw-semibold">Pendientes</span>
-          </div>
-        </div>
-        <div className="col-6 col-md-3">
-          <div className="card shadow-sm border-0 rounded-3 p-3 text-center bg-danger-subtle text-danger-emphasis">
-            <span className="display-6 fw-bold d-block">{rejectedCount}</span>
-            <span className="small fw-semibold">Rechazadas</span>
-          </div>
-        </div>
-      </div>
-
-      {myProducts.length === 0 ? (
-        <div className="card shadow-sm border-0 text-center py-5 rounded-3">
-          <div className="py-4">
-            <span className="display-1 text-muted">🛍️</span>
-            <h4 className="fw-bold mt-3">No tienes ofertas registradas</h4>
-            <p className="text-muted mb-4">Comienza publicando tu primer producto o servicio para conectar con demandantes.</p>
-            <Link to="/publish" className="btn btn-primary fw-bold">
-              Publicar Ahora
-            </Link>
-          </div>
-        </div>
-      ) : (
-        <div className="row g-4">
-          {myProducts.map(p => (
-            <div key={p.id} className="col-md-6 col-lg-4">
-              <div className="card h-100 shadow border-0 rounded-3 overflow-hidden position-relative">
-                {/* Status Badge in Card corner */}
-                <div className="position-absolute top-0 start-0 m-3 z-1">
-                  {getStatusBadge(p.approvalStatus)}
-                </div>
-
-                <img 
-                  src={p.imageUrl || 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&q=80&w=800'} 
-                  className="card-img-top" 
-                  alt={p.name} 
-                  style={{ height: '220px', objectFit: 'cover' }} 
-                />
-                
-                <div className="card-body d-flex flex-column p-4">
-                  <div className="mb-2">
-                    <span className="badge bg-secondary-subtle text-secondary px-2.5 py-1 text-uppercase fw-semibold" style={{ fontSize: '0.75rem' }}>
-                      {p.category}
-                    </span>
-                  </div>
-                  <h4 className="card-title fw-bold text-dark mb-2 text-truncate" title={p.name}>
-                    {p.name}
-                  </h4>
-                  <p className="card-text text-muted small flex-grow-1 mb-3" style={{ display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                    {p.description}
-                  </p>
-                  
-                  <div className="d-flex justify-content-between align-items-center mb-3 pt-2 border-top border-light">
-                    <span className="h4 fw-bold text-primary mb-0">${p.price.toFixed(2)}</span>
-                    <span className="small text-muted">Stock: <strong>{p.stock}</strong></span>
-                  </div>
-
-                  <div className="d-flex gap-2 w-100">
-                    <button 
-                      className="btn btn-outline-dark flex-grow-1 fw-semibold py-2"
-                      onClick={() => handleOpenEdit(p)}
-                    >
-                      Editar
-                    </button>
-                    <button 
-                      className="btn btn-outline-danger fw-semibold py-2"
-                      onClick={() => handleDelete(p.id)}
-                    >
-                      Eliminar
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Edit Modal (Glassmorphic Backdrop Overlay) */}
-      {showEditModal && (
-        <div className="modal show d-block" tabIndex="-1" style={{ backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' }}>
-          <div className="modal-dialog modal-dialog-centered modal-lg">
-            <div className="modal-content border-0 shadow-lg" style={{ borderRadius: '16px' }}>
-              <div className="modal-header border-light p-4">
-                <h4 className="modal-title fw-bold">Editar Oferta</h4>
-                <button type="button" className="btn-close" onClick={() => setShowEditModal(false)}></button>
-              </div>
-              <form onSubmit={handleSaveEdit}>
-                <div className="modal-body p-4">
-                  {/* Warning on Spec Rule */}
-                  <div className="alert alert-warning border-0 d-flex align-items-start mb-4" style={{ borderRadius: '10px' }}>
-                    <span className="me-2 fs-5">⚠️</span>
-                    <div className="small">
-                      <strong>Aviso de Edición Crítica:</strong> Modificar los campos 
-                      <strong> Nombre, Descripción, Precio o Categoría</strong> restablecerá automáticamente el producto al estado 
-                      <strong className="text-warning-emphasis"> "Pendiente de Validación"</strong> para que el administrador vuelva a revisar la calidad.
-                    </div>
-                  </div>
-
-                  <div className="row">
-                    <div className="col-12 mb-3">
-                      <label className="form-label fw-semibold">Nombre o Título</label>
-                      <input 
-                        type="text" 
-                        name="name" 
-                        className="form-control" 
-                        value={editForm.name} 
-                        onChange={handleEditChange} 
-                        required 
-                      />
-                    </div>
-                  </div>
-
-                  <div className="mb-3">
-                    <label className="form-label fw-semibold">Descripción</label>
-                    <textarea 
-                      name="description" 
-                      rows="3" 
-                      className="form-control" 
-                      value={editForm.description} 
-                      onChange={handleEditChange} 
-                      required 
-                    />
-                  </div>
-
-                  <div className="row">
-                    <div className="col-md-6 mb-3">
-                      <label className="form-label fw-semibold">Precio ($)</label>
-                      <input 
-                        type="number" 
-                        step="0.01" 
-                        name="price" 
-                        className="form-control" 
-                        value={editForm.price} 
-                        onChange={handleEditChange} 
-                        required 
-                      />
-                    </div>
-
-                    <div className="col-md-6 mb-3">
-                      <label className="form-label fw-semibold">Stock</label>
-                      <input 
-                        type="number" 
-                        name="stock" 
-                        className="form-control" 
-                        value={editForm.stock} 
-                        onChange={handleEditChange} 
-                        required 
-                      />
-                    </div>
-                  </div>
-
-                  <div className="row">
-                    <div className="col-md-6 mb-3">
-                      <label className="form-label fw-semibold">Categoría</label>
-                      <select 
-                        name="category" 
-                        className="form-select" 
-                        value={editForm.category} 
-                        onChange={handleEditChange}
-                      >
-                        <option value="Ropa">Ropa</option>
-                        <option value="Calzado">Calzado</option>
-                        <option value="Accesorios">Accesorios</option>
-                        <option value="Tecnología">Tecnología</option>
-                        <option value="Servicios">Servicios</option>
-                        <option value="General">Otros</option>
-                      </select>
-                    </div>
-
-                    <div className="col-md-6 mb-3">
-                      <label className="form-label fw-semibold">Ubicación</label>
-                      <input 
-                        type="text" 
-                        name="location" 
-                        className="form-control" 
-                        value={editForm.location} 
-                        onChange={handleEditChange} 
-                      />
-                    </div>
-                  </div>
-                </div>
-                <div className="modal-footer border-light p-4">
-                  <button type="button" className="btn btn-light fw-semibold" onClick={() => setShowEditModal(false)}>
-                    Cancelar
-                  </button>
-                  <button type="submit" className="btn btn-primary fw-semibold px-4" disabled={saveLoading}>
-                    {saveLoading ? 'Guardando...' : 'Guardar Cambios'}
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
+<file path="frontend/src/utils/resolveImage.js">
+export const resolveImage = (url) => {
+  if (!url) return 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?auto=format&fit=crop&q=80&w=800';
+  if (url.startsWith('http')) return url;
+  const backendUrl = import.meta.env.VITE_BACKEND_URL || '';
+  return `${backendUrl}${url}`;
 };
-
-export default SellerDashboard;
-</file>
-
-<file path="frontend/src/services/authService.js">
-import axios from 'axios';
-
-const API_URL = 'http://localhost:5000/api/auth';
-
-const register = async (userData) => {
-  const response = await axios.post(`${API_URL}/register`, userData);
-  return response.data;
-};
-
-const login = async (userData) => {
-  const response = await axios.post(`${API_URL}/login`, userData);
-  if (response.data.token) {
-    localStorage.setItem('user', JSON.stringify(response.data));
-  }
-  return response.data;
-};
-
-const logout = () => {
-  localStorage.removeItem('user');
-};
-
-const authService = {
-  register,
-  login,
-  logout,
-};
-
-export default authService;
-</file>
-
-<file path="frontend/src/services/messageService.js">
-import axios from 'axios';
-
-const API_BASE = 'http://localhost:5000/api';
-
-/**
- * Fetches all conversations for a given user.
- * Returns an array of objects: { id, partnerName, lastMessage, ... }
- */
-export const getMessagesForUser = async (userId, token) => {
-  try {
-    const response = await axios.get(`${API_BASE}/messages/conversations`, {
-      headers: { Authorization: `Bearer ${token}` },
-      params: { userId },
-    });
-    return response.data;
-  } catch (error) {
-    console.error('Error fetching messages', error);
-    throw error;
-  }
-};
-
-// Export default for backward compatibility with existing imports
-export default { getMessagesForUser };
-</file>
-
-<file path="frontend/src/services/userService.js">
-import axios from 'axios';
-
-const API_URL = 'http://localhost:5000/api/users';
-
-const getProfile = async (token) => {
-  const config = {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-  };
-
-  const response = await axios.get(`${API_URL}/profile`, config);
-  return response.data;
-};
-
-const updateProfile = async (userData, token) => {
-  const config = {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-  };
-
-  const response = await axios.put(`${API_URL}/profile`, userData, config);
-  return response.data;
-};
-
-const userService = {
-  getProfile,
-  updateProfile,
-};
-
-export default userService;
-</file>
-
-<file path="frontend/vite.config.js">
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
-
-// https://vitejs.dev/config/
-export default defineConfig({
-  plugins: [react()],
-  server: {
-    port: 3000,
-    proxy: {
-      '/api': 'http://localhost:5000',
-      '/uploads': 'http://localhost:5000'
-    }
-  }
-})
 </file>
 
 <file path="README.md">
@@ -2382,46 +1689,6 @@ La aplicación correrá en `http://localhost:3000`.
 - **Rutas Protegidas:** Acceso exclusivo al perfil para usuarios autenticados.
 - **Gestión de Perfil:** Visualización de datos y edición de nombre/email con validación en tiempo real.
 - **Diseño Premium:** Interfaz moderna, minimalista y responsiva.
-</file>
-
-<file path="backend/config/db.js">
-const { Sequelize } = require('sequelize');
-const path = require('path');
-
-let sequelize;
-
-if (process.env.NODE_ENV === 'test') {
-  sequelize = new Sequelize({
-    dialect: 'sqlite',
-    storage: ':memory:',
-    logging: false
-  });
-} else {
-  sequelize = new Sequelize(process.env.DB_NAME, process.env.DB_USER, process.env.DB_PASSWORD, {
-    host: process.env.DB_HOST,
-    port: process.env.DB_PORT,
-    dialect: 'mysql',
-    logging: false
-  });
-}
-
-const connectDB = async () => {
-  try {
-    await sequelize.authenticate();
-    if (process.env.NODE_ENV === 'test') {
-      console.log('SQLite Test Database Connected');
-    } else {
-      console.log('MySQL Database Connected');
-    }
-  } catch (error) {
-    console.error(`Error connecting to Database: ${error.message}`);
-    if (process.env.NODE_ENV !== 'test') {
-      process.exit(1);
-    }
-  }
-};
-
-module.exports = { sequelize, connectDB };
 </file>
 
 <file path="backend/controllers/adminController.js">
@@ -2637,370 +1904,6 @@ exports.login = async (req, res) => {
     } else {
       res.status(401).json({ error: 'Credenciales inválidas' });
     }
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-};
-</file>
-
-<file path="backend/controllers/productController.js">
-const Product = require('../models/Product');
-const User = require('../models/User');
-const SellerReview = require('../models/SellerReview');
-const { Op } = require('sequelize');
-const jwt = require('jsonwebtoken');
-
-// @desc    Obtener todos los productos con filtros avanzados
-exports.getProducts = async (req, res) => {
-  const { search, category, minPrice, maxPrice, location, sellerId, status } = req.query;
-
-  try {
-    const where = {};
-
-    // Obtener usuario autenticado opcionalmente desde el token
-    let currentUser = null;
-    if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
-      try {
-        const token = req.headers.authorization.split(' ')[1];
-        if (token) {
-          const decoded = jwt.verify(token, process.env.JWT_SECRET || 'supersecretkey123');
-          currentUser = await User.findByPk(decoded.id);
-        }
-      } catch (err) {
-        // Ignorar token inválido
-      }
-    }
-
-    // Aplicar filtros de estado de validación según el rol
-    if (!currentUser || currentUser.role !== 'admin') {
-      if (currentUser && currentUser.role === 'vendedor') {
-        // Vendedor ve aprobados de todos + todos los propios
-        where[Op.or] = [
-          { approvalStatus: 'aprobado' },
-          { sellerId: currentUser.id }
-        ];
-      } else {
-        // Cliente o invitado solo ve aprobados
-        where.approvalStatus = 'aprobado';
-      }
-    } else {
-      // Admin ve todo, pero si filtra por approvalStatus lo respetamos
-      if (req.query.approvalStatus) {
-        where.approvalStatus = req.query.approvalStatus;
-      }
-    }
-
-    if (search) {
-      where[Op.or] = [
-        { name: { [Op.like]: `%${search}%` } },
-        { description: { [Op.like]: `%${search}%` } }
-      ];
-    }
-
-    if (category && category !== 'Todos') {
-      where.category = category;
-    }
-
-    if (location) {
-      where.location = { [Op.like]: `%${location}%` };
-    }
-
-    if (sellerId) {
-      where.sellerId = sellerId;
-    }
-
-    if (status) {
-      where.status = status;
-    }
-
-    if (minPrice || maxPrice) {
-      where.price = {};
-      if (minPrice) {
-        where.price[Op.gte] = parseFloat(minPrice);
-      }
-      if (maxPrice) {
-        where.price[Op.lte] = parseFloat(maxPrice);
-      }
-    }
-
-    const products = await Product.findAll({
-      where,
-      order: [['createdAt', 'DESC']],
-      include: [
-        {
-          model: User,
-          as: 'seller',
-          attributes: ['id', 'name', 'email', 'avatarUrl', 'location', 'createdAt']
-        }
-      ]
-    });
-
-    // Batch-load seller reputation to avoid N+1 queries
-    const sellerIds = [...new Set(products.map(p => p.sellerId).filter(Boolean))];
-    const reviewMap = {};
-    if (sellerIds.length > 0) {
-      const allReviews = await SellerReview.findAll({
-        where: { sellerId: sellerIds }
-      });
-      for (const sellerId of sellerIds) {
-        const reviews = allReviews.filter(r => r.sellerId === sellerId);
-        const avg = reviews.length > 0
-          ? parseFloat((reviews.reduce((a, r) => a + r.rating, 0) / reviews.length).toFixed(1))
-          : 0;
-        reviewMap[sellerId] = { avgRating: avg, reviewsCount: reviews.length };
-      }
-    }
-
-    // Attach reputation to each product's seller
-    const enriched = products.map(p => {
-      const plain = p.toJSON();
-      if (plain.seller && reviewMap[plain.sellerId]) {
-        plain.seller.avgRating = reviewMap[plain.sellerId].avgRating;
-        plain.seller.reviewsCount = reviewMap[plain.sellerId].reviewsCount;
-      }
-      return plain;
-    });
-
-    res.json(enriched);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-};
-
-
-// @desc    Obtener un producto por ID con detalles del vendedor y su reputación
-// @route   GET /api/products/:id
-// @access  Public
-exports.getProductById = async (req, res) => {
-  try {
-    const product = await Product.findByPk(req.params.id, {
-      include: [
-        {
-          model: User,
-          as: 'seller',
-          attributes: ['id', 'name', 'email', 'avatarUrl', 'bio', 'location', 'createdAt']
-        }
-      ]
-    });
-
-    if (!product) {
-      return res.status(404).json({ error: 'Producto no encontrado' });
-    }
-
-    // Calcular reputación del vendedor (calificación promedio y comentarios)
-    const reviews = await SellerReview.findAll({
-      where: { sellerId: product.sellerId },
-      include: [
-        {
-          model: User,
-          as: 'buyer',
-          attributes: ['id', 'name', 'avatarUrl']
-        }
-      ]
-    });
-
-    let avgRating = 0;
-    if (reviews.length > 0) {
-      const sum = reviews.reduce((acc, r) => acc + r.rating, 0);
-      avgRating = parseFloat((sum / reviews.length).toFixed(1));
-    }
-
-    const response = {
-      ...product.toJSON(),
-      seller: {
-        ...product.seller.toJSON(),
-        avgRating,
-        reviewsCount: reviews.length,
-        reviews
-      }
-    };
-
-    res.json(response);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-};
-
-// @desc    Crear un producto (Vendedor o Admin)
-// @route   POST /api/products
-// @access  Private (Vendedor / Admin)
-exports.createProduct = async (req, res) => {
-  const { name, description, price, category, images, stock, status, location } = req.body;
-  const sellerId = req.user.id;
-  // If an image file was uploaded, use its path as imageUrl
-  const imageUrl = req.file ? `/uploads/${req.file.filename}` : undefined;
-
-  try {
-    if (req.user.role !== 'vendedor' && req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'No autorizado. Solo vendedores pueden publicar productos.' });
-    }
-
-    if (!name || !price) {
-      return res.status(400).json({ error: 'El nombre y el precio son obligatorios.' });
-    }
-
-    const product = await Product.create({
-      name,
-      description,
-      price,
-      category: category || 'General',
-      imageUrl: imageUrl || req.body.imageUrl,
-      images,
-      stock: stock !== undefined ? parseInt(stock) : 1,
-      sellerId,
-      status: status || 'nuevo',
-      approvalStatus: 'pendiente',
-      location: location || req.user.location || 'No especificada'
-    });
-
-    res.status(201).json(product);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-};
-
-// @desc    Actualizar un producto (Dueño o Admin)
-// @route   PUT /api/products/:id
-// @access  Private
-exports.updateProduct = async (req, res) => {
-  const { name, description, price, category, imageUrl, images, stock, status, location } = req.body;
-
-  try {
-    const product = await Product.findByPk(req.params.id);
-
-    if (!product) {
-      return res.status(404).json({ error: 'Producto no encontrado' });
-    }
-
-    // Verificar si es dueño o admin
-    if (product.sellerId !== req.user.id && req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'No autorizado para editar este producto.' });
-    }
-
-    // Verificar si hay cambios críticos para regresar a pendiente
-    const isCriticalChange =
-      (name !== undefined && name !== product.name) ||
-      (description !== undefined && description !== product.description) ||
-      (price !== undefined && parseFloat(price) !== product.price) ||
-      (category !== undefined && category !== product.category);
-
-    if (isCriticalChange) {
-      product.approvalStatus = 'pendiente';
-    }
-
-    product.name = name || product.name;
-    product.description = description !== undefined ? description : product.description;
-    product.price = price !== undefined ? parseFloat(price) : product.price;
-    product.category = category || product.category;
-    product.imageUrl = imageUrl || product.imageUrl;
-    product.images = images !== undefined ? images : product.images;
-    product.stock = stock !== undefined ? parseInt(stock) : product.stock;
-    product.status = status || product.status;
-    product.location = location || product.location;
-
-    await product.save();
-    res.json(product);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-};
-
-// @desc    Eliminar un producto (Dueño o Admin)
-// @route   DELETE /api/products/:id
-// @access  Private
-exports.deleteProduct = async (req, res) => {
-  try {
-    const product = await Product.findByPk(req.params.id);
-
-    if (!product) {
-      return res.status(404).json({ error: 'Producto no encontrado' });
-    }
-
-    // Verificar si es dueño o admin
-    if (product.sellerId !== req.user.id && req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'No autorizado para eliminar este producto.' });
-    }
-
-    await product.destroy();
-    res.json({ message: 'Producto eliminado' });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-};
-
-// @desc    Agregar reseña a un vendedor
-// @route   POST /api/products/seller/:sellerId/review
-// @access  Private
-exports.createSellerReview = async (req, res) => {
-  const { rating, comment } = req.body;
-  const sellerId = req.params.sellerId;
-  const buyerId = req.user.id;
-
-  try {
-    if (buyerId == sellerId) {
-      return res.status(400).json({ error: 'No puedes valorarte a ti mismo.' });
-    }
-
-    if (!rating || rating < 1 || rating > 5) {
-      return res.status(400).json({ error: 'La calificación debe ser un entero entre 1 y 5.' });
-    }
-
-    // Verificar si el vendedor existe
-    const seller = await User.findByPk(sellerId);
-    if (!seller || seller.role !== 'vendedor') {
-      return res.status(404).json({ error: 'Vendedor no encontrado.' });
-    }
-
-    // Verificar si ya tiene reseña de este comprador
-    const existingReview = await SellerReview.findOne({
-      where: { sellerId, buyerId }
-    });
-
-    if (existingReview) {
-      existingReview.rating = rating;
-      existingReview.comment = comment || existingReview.comment;
-      await existingReview.save();
-      return res.json({ message: 'Reseña actualizada', review: existingReview });
-    }
-
-    const review = await SellerReview.create({
-      sellerId,
-      buyerId,
-      rating,
-      comment
-    });
-
-    res.status(201).json(review);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-};
-
-// @desc    Validar producto (Aprobar o Rechazar)
-// @route   PUT /api/products/:id/validate
-// @access  Private (Admin)
-exports.validateProduct = async (req, res) => {
-  const { approvalStatus } = req.body;
-
-  try {
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'No autorizado. Solo administradores pueden validar productos.' });
-    }
-
-    if (!approvalStatus || !['aprobado', 'rechazado', 'pendiente'].includes(approvalStatus)) {
-      return res.status(400).json({ error: 'Estado de aprobación no válido.' });
-    }
-
-    const product = await Product.findByPk(req.params.id);
-
-    if (!product) {
-      return res.status(404).json({ error: 'Producto no encontrado' });
-    }
-
-    product.approvalStatus = approvalStatus;
-    await product.save();
-
-    res.json(product);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -3418,38 +2321,6 @@ User.prototype.matchPassword = async function (enteredPassword) {
 module.exports = User;
 </file>
 
-<file path="backend/package.json">
-{
-  "name": "cozastore-backend",
-  "version": "1.0.0",
-  "description": "Backend for COZASTORE - User Management Module",
-  "main": "server.js",
-  "scripts": {
-    "start": "node server.js",
-    "dev": "nodemon server.js",
-    "seed": "node seed.js",
-    "test": "jest --runInBand --detectOpenHandles"
-  },
-  "dependencies": {
-    "bcryptjs": "^2.4.3",
-    "cors": "^2.8.5",
-    "dotenv": "^16.3.1",
-    "express": "^4.18.2",
-    "express-validator": "^7.0.1",
-    "jsonwebtoken": "^9.0.1",
-    "multer": "^1.4.5-lts.1",
-    "mysql2": "^3.9.2",
-    "sequelize": "^6.37.8"
-  },
-  "devDependencies": {
-    "jest": "^30.4.2",
-    "nodemon": "^3.0.1",
-    "sqlite3": "^6.0.1",
-    "supertest": "^7.2.2"
-  }
-}
-</file>
-
 <file path="backend/routes/productRoutes.js">
 const express = require('express');
 const router = express.Router();
@@ -3479,77 +2350,6 @@ router.post('/seller/:sellerId/review', protect, createSellerReview);
 module.exports = router;
 
 module.exports = router;
-</file>
-
-<file path="backend/server.js">
-require('dotenv').config();
-const express = require('express');
-const cors = require('cors');
-const { connectDB, sequelize } = require('./config/db');
-const app = express();
-
-const authRoutes = require('./routes/authRoutes');
-const userRoutes = require('./routes/userRoutes');
-const adminRoutes = require('./routes/adminRoutes');
-const productRoutes = require('./routes/productRoutes');
-const messageRoutes = require('./routes/messageRoutes');
-
-// Importar modelos para establecer relaciones
-const User = require('./models/User');
-const Product = require('./models/Product');
-const SellerReview = require('./models/SellerReview');
-const Message = require('./models/Message');
-
-// Definir Relaciones/Asociaciones
-User.hasMany(Product, { foreignKey: 'sellerId', as: 'products', onDelete: 'CASCADE' });
-Product.belongsTo(User, { foreignKey: 'sellerId', as: 'seller' });
-
-User.hasMany(SellerReview, { foreignKey: 'sellerId', as: 'sellerReviews', onDelete: 'CASCADE' });
-SellerReview.belongsTo(User, { foreignKey: 'sellerId', as: 'seller' });
-SellerReview.belongsTo(User, { foreignKey: 'buyerId', as: 'buyer' });
-
-Message.belongsTo(User, { foreignKey: 'senderId', as: 'sender' });
-Message.belongsTo(User, { foreignKey: 'receiverId', as: 'receiver' });
-Message.belongsTo(Product, { foreignKey: 'productId', as: 'product' });
-
-// Conectar a la base de datos y sincronizar modelos
-connectDB().then(() => {
-  return sequelize.sync({ alter: true });
-}).then(() => {
-  console.log('Database synced with relationships');
-}).catch(err => {
-  console.error('Failed to sync db: ' + err.message);
-});
-
-const path = require('path');
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
-
-
-// Middlewares
-app.use(cors());
-app.use(express.json());
-
-// Rutas
-app.use('/api/auth', authRoutes);
-app.use('/api/users', userRoutes);
-app.use('/api/admin', adminRoutes);
-app.use('/api/products', productRoutes);
-app.use('/api/messages', messageRoutes);
-
-// Ruta de prueba
-app.get('/', (req, res) => {
-  res.send('API de COZASTORE corriendo...');
-});
-
-const PORT = process.env.PORT || 5000;
-
-if (process.env.NODE_ENV !== 'test') {
-  app.listen(PORT, () => {
-    console.log(`Servidor ejecutándose en el puerto ${PORT} en modo ${process.env.NODE_ENV}`);
-  });
-}
-
-module.exports = app;
 </file>
 
 <file path="frontend/index.html">
@@ -4499,10 +3299,1413 @@ body {
 }
 </file>
 
+<file path="frontend/src/pages/Products.jsx">
+import { useState, useEffect, useRef } from 'react';
+import productService from '../services/productService';
+
+
+import { resolveImage } from '../utils/resolveImage';
+
+// Star rating component
+const Stars = ({ rating, count }) => {
+  const full = Math.floor(rating);
+  const half = rating - full >= 0.5;
+  return (
+    <span className="d-flex align-items-center gap-1" style={{ fontSize: '0.78rem' }}>
+      {[1, 2, 3, 4, 5].map(i => (
+        <span key={i} style={{ color: i <= full ? '#f59e0b' : (i === full + 1 && half ? '#f59e0b' : '#d1d5db'), fontSize: '0.85rem' }}>
+          {i <= full ? '★' : (i === full + 1 && half ? '⯨' : '☆')}
+        </span>
+      ))}
+      <span className="text-muted ms-1">{rating > 0 ? `${rating} (${count})` : 'Sin reseñas'}</span>
+    </span>
+  );
+};
+
+// ── Cart sidebar component ──────────────────────────────────────────────────
+const CartSidebar = ({ cart, onRemove, onClose, visible }) => {
+  const total = cart.reduce((acc, item) => acc + item.price * (item.qty || 1), 0);
+
+  return (
+    <>
+      {/* Backdrop */}
+      {visible && (
+        <div
+          onClick={onClose}
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)',
+            zIndex: 1040, backdropFilter: 'blur(3px)'
+          }}
+        />
+      )}
+      {/* Drawer */}
+      <div style={{
+        position: 'fixed', top: 0, right: 0, height: '100vh', width: '380px',
+        maxWidth: '95vw', background: '#fff', zIndex: 1050,
+        transform: visible ? 'translateX(0)' : 'translateX(110%)',
+        transition: 'transform 0.35s cubic-bezier(.4,0,.2,1)',
+        boxShadow: '-4px 0 30px rgba(0,0,0,0.15)',
+        display: 'flex', flexDirection: 'column'
+      }}>
+        {/* Header */}
+        <div className="p-4 border-bottom d-flex justify-content-between align-items-center bg-dark text-white">
+          <h5 className="mb-0 fw-bold">🛒 Mi Carrito <span className="badge bg-primary ms-2">{cart.length}</span></h5>
+          <button className="btn btn-sm btn-outline-light" onClick={onClose}>✕</button>
+        </div>
+
+        {/* Items */}
+        <div className="flex-grow-1 overflow-auto p-3">
+          {cart.length === 0 ? (
+            <div className="text-center py-5 text-muted">
+              <span style={{ fontSize: '3rem' }}>🛒</span>
+              <p className="mt-3">Tu carrito está vacío</p>
+            </div>
+          ) : (
+            cart.map((item) => (
+              <div key={item.cartId} className="d-flex align-items-center gap-3 mb-3 p-2 rounded-3 bg-light border">
+                <img
+                  src={resolveImage(item.imageUrl)}
+                  alt={item.name}
+                  style={{ width: '60px', height: '60px', objectFit: 'cover', borderRadius: '8px', flexShrink: 0 }}
+                />
+                <div className="flex-grow-1 min-width-0">
+                  <div className="fw-semibold text-truncate" style={{ maxWidth: '200px' }}>{item.name}</div>
+                  <div className="small text-muted">{item.seller?.name || 'Ofertante'}</div>
+                  <div className="fw-bold text-primary">${item.price.toFixed(2)}</div>
+                </div>
+                <button
+                  className="btn btn-sm btn-outline-danger flex-shrink-0"
+                  onClick={() => onRemove(item.cartId)}
+                >✕</button>
+              </div>
+            ))
+          )}
+        </div>
+
+        {/* Footer total */}
+        {cart.length > 0 && (
+          <div className="p-4 border-top bg-light">
+            <div className="d-flex justify-content-between mb-3">
+              <span className="fw-semibold">Total ({cart.length} item{cart.length !== 1 ? 's' : ''})</span>
+              <span className="fw-bold h5 text-primary mb-0">${total.toFixed(2)}</span>
+            </div>
+            <button className="btn btn-primary w-100 fw-bold py-2">
+              Proceder al Pago →
+            </button>
+          </div>
+        )}
+      </div>
+    </>
+  );
+};
+
+// ── Main Products page ──────────────────────────────────────────────────────
+const Products = () => {
+  const [products, setProducts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [cart, setCart] = useState([]);
+  const [cartOpen, setCartOpen] = useState(false);
+  const [addedId, setAddedId] = useState(null); // track which product just got added
+  const [search, setSearch] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('Todos');
+  const addedTimerRef = useRef(null);
+
+  const CATEGORIES = ['Todos', 'Ropa', 'Calzado', 'Accesorios', 'Tecnología', 'Servicios', 'General'];
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const data = await productService.getProducts();
+        setProducts(data);
+      } catch (err) {
+        console.error('Error al cargar productos', err);
+      } finally {
+        setLoading(false);
+      }
+    })();
+
+    const savedCart = JSON.parse(localStorage.getItem('cart')) || [];
+    setCart(savedCart);
+  }, []);
+
+  const addToCart = (product) => {
+    const newCart = [...cart, { ...product, cartId: Date.now(), qty: 1 }];
+    setCart(newCart);
+    localStorage.setItem('cart', JSON.stringify(newCart));
+
+    // Brief "added" animation on the button
+    setAddedId(product.id);
+    clearTimeout(addedTimerRef.current);
+    addedTimerRef.current = setTimeout(() => setAddedId(null), 1500);
+
+    // Open cart sidebar after short delay
+    setTimeout(() => setCartOpen(true), 200);
+  };
+
+  const removeFromCart = (cartId) => {
+    const newCart = cart.filter(i => i.cartId !== cartId);
+    setCart(newCart);
+    localStorage.setItem('cart', JSON.stringify(newCart));
+  };
+
+  // Filtering
+  const visible = products.filter(p => {
+    const matchSearch = p.name.toLowerCase().includes(search.toLowerCase()) ||
+      (p.description || '').toLowerCase().includes(search.toLowerCase());
+    const matchCat = categoryFilter === 'Todos' || p.category === categoryFilter;
+    return matchSearch && matchCat;
+  });
+
+  if (loading) return (
+    <div className="container mt-5 py-5 text-center">
+      <div className="spinner-border text-primary" role="status"></div>
+      <p className="mt-3 text-muted">Cargando catálogo...</p>
+    </div>
+  );
+
+  return (
+    <>
+      <CartSidebar
+        cart={cart}
+        onRemove={removeFromCart}
+        onClose={() => setCartOpen(false)}
+        visible={cartOpen}
+      />
+
+      <div className="container mt-5 pb-5">
+        {/* Header */}
+        <div className="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-4">
+          <div>
+            <h2 className="fw-bold mb-1">Catálogo de Productos</h2>
+            <p className="text-muted mb-0">{visible.length} oferta{visible.length !== 1 ? 's' : ''} disponible{visible.length !== 1 ? 's' : ''}</p>
+          </div>
+          {/* Cart button */}
+          <button
+            className="btn btn-dark fw-semibold d-flex align-items-center gap-2 position-relative px-4"
+            onClick={() => setCartOpen(true)}
+          >
+            🛒 Ver Carrito
+            {cart.length > 0 && (
+              <span className="badge bg-primary rounded-pill">{cart.length}</span>
+            )}
+          </button>
+        </div>
+
+        {/* Search + Category Filters */}
+        <div className="row g-3 mb-4">
+          <div className="col-md-7">
+            <input
+              type="text"
+              className="form-control py-2 shadow-sm"
+              placeholder="🔍  Buscar productos o servicios..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+            />
+          </div>
+          <div className="col-md-5">
+            <div className="d-flex gap-2 flex-wrap">
+              {CATEGORIES.map(cat => (
+                <button
+                  key={cat}
+                  onClick={() => setCategoryFilter(cat)}
+                  className={`btn btn-sm fw-semibold px-3 ${categoryFilter === cat ? 'btn-dark' : 'btn-outline-secondary'}`}
+                  style={{ borderRadius: '20px' }}
+                >
+                  {cat}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Product Grid */}
+        {visible.length === 0 ? (
+          <div className="text-center py-5 text-muted">
+            <span style={{ fontSize: '3rem' }}>🔎</span>
+            <h5 className="mt-3">No se encontraron productos</h5>
+          </div>
+        ) : (
+          <div className="row g-4">
+            {visible.map((p) => {
+              const isAdded = addedId === p.id;
+              const avgRating = p.seller?.avgRating || 0;
+              const reviewCount = p.seller?.reviewsCount || 0;
+
+              return (
+                <div key={p.id} className="col-sm-6 col-lg-4 col-xl-3">
+                  <div
+                    className="card h-100 border-0 shadow-sm product-card"
+                    style={{ borderRadius: '14px', overflow: 'hidden', transition: 'transform .2s, box-shadow .2s' }}
+                    onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-4px)'; e.currentTarget.style.boxShadow = '0 12px 32px rgba(0,0,0,0.12)'; }}
+                    onMouseLeave={e => { e.currentTarget.style.transform = ''; e.currentTarget.style.boxShadow = ''; }}
+                  >
+                    {/* Product image */}
+                    <div style={{ position: 'relative' }}>
+                      <img
+                        src={resolveImage(p.imageUrl)}
+                        className="card-img-top"
+                        alt={p.name}
+                        style={{ height: '200px', objectFit: 'cover' }}
+                        onError={e => { e.target.src = 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?auto=format&fit=crop&q=80&w=800'; }}
+                      />
+                      {/* Category badge */}
+                      <span
+                        className="badge bg-dark text-white px-2 py-1"
+                        style={{ position: 'absolute', bottom: '8px', left: '8px', fontSize: '0.7rem', borderRadius: '8px', opacity: 0.85 }}
+                      >
+                        {p.category}
+                      </span>
+                    </div>
+
+                    <div className="card-body d-flex flex-column p-3">
+                      {/* Product name & description */}
+                      <h6 className="card-title fw-bold text-dark mb-1 text-truncate" title={p.name}>{p.name}</h6>
+                      <p className="card-text text-muted small mb-2" style={{
+                        display: '-webkit-box', WebkitLineClamp: 2,
+                        WebkitBoxOrient: 'vertical', overflow: 'hidden'
+                      }}>
+                        {p.description}
+                      </p>
+
+                      {/* ── Seller info block ── */}
+                      {p.seller && (
+                        <div className="d-flex align-items-center gap-2 mb-2 p-2 rounded-2" style={{ background: '#f8f9fa' }}>
+                          <img
+                            src={resolveImage(p.seller.avatarUrl)}
+                            alt={p.seller.name}
+                            style={{ width: '32px', height: '32px', borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }}
+                            onError={e => { e.target.src = 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=80&q=80'; }}
+                          />
+                          <div style={{ minWidth: 0 }}>
+                            <div className="fw-semibold text-dark text-truncate" style={{ fontSize: '0.8rem' }}>
+                              {p.seller.name}
+                            </div>
+                            <Stars rating={avgRating} count={reviewCount} />
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Price + Location */}
+                      <div className="mt-auto">
+                        <div className="d-flex justify-content-between align-items-center mb-1">
+                          <span className="fw-bold text-primary" style={{ fontSize: '1.15rem' }}>${p.price.toFixed(2)}</span>
+                          {p.location && (
+                            <span className="text-muted" style={{ fontSize: '0.72rem' }}>📍 {p.location}</span>
+                          )}
+                        </div>
+
+                        {/* Add to cart button */}
+                        <button
+                          className={`btn w-100 fw-semibold py-2 ${isAdded ? 'btn-success' : 'btn-dark'}`}
+                          style={{ borderRadius: '10px', transition: 'background .3s, transform .1s' }}
+                          onClick={() => addToCart(p)}
+                          disabled={isAdded}
+                        >
+                          {isAdded ? '✓ Agregado' : '🛒 Agregar al carrito'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </>
+  );
+};
+
+export default Products;
+</file>
+
+<file path="frontend/src/pages/Register.jsx">
+import { useState, useContext } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { AuthContext } from '../context/AuthContext';
+
+const Register = () => {
+  const [formData, setFormData] = useState({
+    name: '',
+    email: '',
+    password: '',
+    passwordConfirm: '',
+    role: 'comprador',
+  });
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const { register } = useContext(AuthContext);
+  const navigate = useNavigate();
+
+  const { name, email, password, passwordConfirm, role } = formData;
+
+  const onChange = (e) =>
+    setFormData({ ...formData, [e.target.name]: e.target.value });
+
+  const onSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+    
+    if (password !== passwordConfirm) {
+      return setError('Las contraseñas no coinciden');
+    }
+
+    try {
+      await register(formData);
+      setSuccess('Cuenta creada exitosamente. Redirigiendo al login...');
+      setTimeout(() => {
+        navigate('/login');
+      }, 2000);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Error al registrarse');
+    }
+  };
+
+  return (
+    <div className="auth-container">
+      <div className="auth-card">
+        <h2 className="auth-title">Crear Cuenta</h2>
+        
+        {error && <div className="alert alert-error">{error}</div>}
+        {success && <div className="alert alert-success">{success}</div>}
+
+        <form onSubmit={onSubmit}>
+          <div className="form-group">
+            <label className="form-label">Nombre Completo</label>
+            <input
+              type="text"
+              className="form-input"
+              name="name"
+              value={name}
+              onChange={onChange}
+              required
+              placeholder="Ej: Juan Pérez"
+            />
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Email</label>
+            <input
+              type="email"
+              className="form-input"
+              name="email"
+              value={email}
+              onChange={onChange}
+              required
+              placeholder="tu@email.com"
+            />
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Contraseña</label>
+            <input
+              type="password"
+              className="form-input"
+              name="password"
+              value={password}
+              onChange={onChange}
+              required
+              placeholder="Mínimo 6 caracteres"
+              minLength={6}
+            />
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Confirmar Contraseña</label>
+            <input
+              type="password"
+              className="form-input"
+              name="passwordConfirm"
+              value={passwordConfirm}
+              onChange={onChange}
+              required
+              placeholder="Repite tu contraseña"
+            />
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Tipo de Cuenta</label>
+            <select
+              className="form-input"
+              name="role"
+              value={role}
+              onChange={onChange}
+              style={{ padding: '0.6rem', border: '1px solid #ddd', borderRadius: '4px', background: '#fff' }}
+            >
+              <option value="comprador">Demandante (Comprar productos/servicios)</option>
+              <option value="vendedor">Ofertante (Publicar productos/servicios)</option>
+            </select>
+          </div>
+
+          <button type="submit" className="btn-primary">
+            Registrarse
+          </button>
+        </form>
+
+        <div className="auth-footer">
+          ¿Ya tienes cuenta? <Link to="/login" className="auth-link">Inicia Sesión</Link>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default Register;
+</file>
+
+<file path="frontend/src/pages/SellerDashboard.jsx">
+import { useContext, useEffect, useState } from 'react';
+import { AuthContext } from '../context/AuthContext';
+import productService from '../services/productService';
+import { Link } from 'react-router-dom';
+import { resolveImage } from '../utils/resolveImage';
+
+const SellerDashboard = () => {
+  const { user, token } = useContext(AuthContext);
+  const [myProducts, setMyProducts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  // Edit Modal State
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState(null);
+  const [editForm, setEditForm] = useState({
+    name: '',
+    description: '',
+    price: '',
+    category: '',
+    stock: '',
+    location: ''
+  });
+  const [saveLoading, setSaveLoading] = useState(false);
+
+  const fetchMyProducts = async () => {
+    try {
+      setLoading(true);
+      const allProducts = await productService.getProducts(token);
+      // Filter products belonging to this seller
+      const filtered = allProducts.filter(p => p.sellerId === user?.id);
+      setMyProducts(filtered);
+    } catch (err) {
+      console.error('Error loading seller products', err);
+      setError('No se pudieron cargar tus ofertas.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (user && token) {
+      fetchMyProducts();
+    }
+  }, [user, token]);
+
+  const handleDelete = async (id) => {
+    if (window.confirm('¿Estás seguro de que deseas eliminar este producto/servicio permanentemente?')) {
+      try {
+        await productService.deleteProduct(id, token);
+        setMyProducts(myProducts.filter(p => p.id !== id));
+        alert('Producto eliminado correctamente.');
+      } catch (err) {
+        alert(err.response?.data?.error || 'Error al eliminar el producto');
+      }
+    }
+  };
+
+  const handleOpenEdit = (product) => {
+    setSelectedProduct(product);
+    setEditForm({
+      name: product.name,
+      description: product.description || '',
+      price: product.price,
+      category: product.category || 'General',
+      stock: product.stock,
+      location: product.location || ''
+    });
+    setShowEditModal(true);
+  };
+
+  const handleEditChange = (e) => {
+    setEditForm({ ...editForm, [e.target.name]: e.target.value });
+  };
+
+  const handleSaveEdit = async (e) => {
+    e.preventDefault();
+    setSaveLoading(true);
+    try {
+      const updatedData = {
+        name: editForm.name,
+        description: editForm.description,
+        price: parseFloat(editForm.price),
+        category: editForm.category,
+        stock: parseInt(editForm.stock, 10),
+        location: editForm.location
+      };
+
+      await productService.updateProduct(selectedProduct.id, updatedData, token);
+      
+      // Reload products
+      await fetchMyProducts();
+      setShowEditModal(false);
+      alert('Cambios guardados con éxito.');
+    } catch (err) {
+      alert(err.response?.data?.error || 'Error al actualizar el producto');
+    } finally {
+      setSaveLoading(false);
+    }
+  };
+
+  // Badges helper
+  const getStatusBadge = (status) => {
+    switch (status) {
+      case 'pendiente':
+        return <span className="badge bg-warning text-dark px-3 py-2 shadow-sm rounded-pill">⏳ Pendiente</span>;
+      case 'aprobado':
+        return <span className="badge bg-success px-3 py-2 shadow-sm rounded-pill">✓ Aprobado</span>;
+      case 'rechazado':
+        return <span className="badge bg-danger px-3 py-2 shadow-sm rounded-pill">✗ Rechazado</span>;
+      default:
+        return <span className="badge bg-secondary px-3 py-2 shadow-sm rounded-pill">{status}</span>;
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="container mt-5 py-5 text-center">
+        <div className="spinner-border text-primary" role="status">
+          <span className="visually-hidden">Cargando...</span>
+        </div>
+        <p className="mt-3 text-muted">Cargando tu inventario de ofertas...</p>
+      </div>
+    );
+  }
+
+  // Count summaries
+  const pendingCount = myProducts.filter(p => p.approvalStatus === 'pendiente').length;
+  const approvedCount = myProducts.filter(p => p.approvalStatus === 'aprobado').length;
+  const rejectedCount = myProducts.filter(p => p.approvalStatus === 'rechazado').length;
+
+  return (
+    <div className="container mt-5 pb-5">
+      {/* Header and Publish button */}
+      <div className="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-5">
+        <div>
+          <h2 className="fw-bold mb-1 text-dark">Mi Catálogo de Ofertas</h2>
+          <p className="text-muted mb-0">Gestiona y publica tus productos o servicios en la plataforma</p>
+        </div>
+        <Link to="/publish" className="btn btn-primary btn-lg fw-bold px-4 shadow">
+          + Publicar Nuevo
+        </Link>
+      </div>
+
+      {error && <div className="alert alert-danger border-0 shadow-sm mb-4">{error}</div>}
+
+      {/* Summary Stats Cards */}
+      <div className="row g-3 mb-5">
+        <div className="col-6 col-md-3">
+          <div className="card shadow-sm border-0 rounded-3 p-3 text-center bg-light">
+            <span className="display-6 fw-bold text-dark d-block">{myProducts.length}</span>
+            <span className="small text-muted fw-semibold">Total Ofertas</span>
+          </div>
+        </div>
+        <div className="col-6 col-md-3">
+          <div className="card shadow-sm border-0 rounded-3 p-3 text-center bg-success-subtle text-success-emphasis">
+            <span className="display-6 fw-bold d-block">{approvedCount}</span>
+            <span className="small fw-semibold">Aprobadas</span>
+          </div>
+        </div>
+        <div className="col-6 col-md-3">
+          <div className="card shadow-sm border-0 rounded-3 p-3 text-center bg-warning-subtle text-warning-emphasis">
+            <span className="display-6 fw-bold d-block">{pendingCount}</span>
+            <span className="small fw-semibold">Pendientes</span>
+          </div>
+        </div>
+        <div className="col-6 col-md-3">
+          <div className="card shadow-sm border-0 rounded-3 p-3 text-center bg-danger-subtle text-danger-emphasis">
+            <span className="display-6 fw-bold d-block">{rejectedCount}</span>
+            <span className="small fw-semibold">Rechazadas</span>
+          </div>
+        </div>
+      </div>
+
+      {myProducts.length === 0 ? (
+        <div className="card shadow-sm border-0 text-center py-5 rounded-3">
+          <div className="py-4">
+            <span className="display-1 text-muted">🛍️</span>
+            <h4 className="fw-bold mt-3">No tienes ofertas registradas</h4>
+            <p className="text-muted mb-4">Comienza publicando tu primer producto o servicio para conectar con demandantes.</p>
+            <Link to="/publish" className="btn btn-primary fw-bold">
+              Publicar Ahora
+            </Link>
+          </div>
+        </div>
+      ) : (
+        <div className="row g-4">
+          {myProducts.map(p => (
+            <div key={p.id} className="col-md-6 col-lg-4">
+              <div className="card h-100 shadow border-0 rounded-3 overflow-hidden position-relative">
+                {/* Status Badge in Card corner */}
+                <div className="position-absolute top-0 start-0 m-3 z-1">
+                  {getStatusBadge(p.approvalStatus)}
+                </div>
+
+                <img 
+                  src={resolveImage(p.imageUrl)} 
+                  className="card-img-top" 
+                  alt={p.name} 
+                  style={{ height: '220px', objectFit: 'cover' }} 
+                />
+                
+                <div className="card-body d-flex flex-column p-4">
+                  <div className="mb-2">
+                    <span className="badge bg-secondary-subtle text-secondary px-2.5 py-1 text-uppercase fw-semibold" style={{ fontSize: '0.75rem' }}>
+                      {p.category}
+                    </span>
+                  </div>
+                  <h4 className="card-title fw-bold text-dark mb-2 text-truncate" title={p.name}>
+                    {p.name}
+                  </h4>
+                  <p className="card-text text-muted small flex-grow-1 mb-3" style={{ display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                    {p.description}
+                  </p>
+                  
+                  <div className="d-flex justify-content-between align-items-center mb-3 pt-2 border-top border-light">
+                    <span className="h4 fw-bold text-primary mb-0">${p.price.toFixed(2)}</span>
+                    <span className="small text-muted">Stock: <strong>{p.stock}</strong></span>
+                  </div>
+
+                  <div className="d-flex gap-2 w-100">
+                    <button 
+                      className="btn btn-outline-dark flex-grow-1 fw-semibold py-2"
+                      onClick={() => handleOpenEdit(p)}
+                    >
+                      Editar
+                    </button>
+                    <button 
+                      className="btn btn-outline-danger fw-semibold py-2"
+                      onClick={() => handleDelete(p.id)}
+                    >
+                      Eliminar
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Edit Modal (Glassmorphic Backdrop Overlay) */}
+      {showEditModal && (
+        <div className="modal show d-block" tabIndex="-1" style={{ backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' }}>
+          <div className="modal-dialog modal-dialog-centered modal-lg">
+            <div className="modal-content border-0 shadow-lg" style={{ borderRadius: '16px' }}>
+              <div className="modal-header border-light p-4">
+                <h4 className="modal-title fw-bold">Editar Oferta</h4>
+                <button type="button" className="btn-close" onClick={() => setShowEditModal(false)}></button>
+              </div>
+              <form onSubmit={handleSaveEdit}>
+                <div className="modal-body p-4">
+                  {/* Warning on Spec Rule */}
+                  <div className="alert alert-warning border-0 d-flex align-items-start mb-4" style={{ borderRadius: '10px' }}>
+                    <span className="me-2 fs-5">⚠️</span>
+                    <div className="small">
+                      <strong>Aviso de Edición Crítica:</strong> Modificar los campos 
+                      <strong> Nombre, Descripción, Precio o Categoría</strong> restablecerá automáticamente el producto al estado 
+                      <strong className="text-warning-emphasis"> "Pendiente de Validación"</strong> para que el administrador vuelva a revisar la calidad.
+                    </div>
+                  </div>
+
+                  <div className="row">
+                    <div className="col-12 mb-3">
+                      <label className="form-label fw-semibold">Nombre o Título</label>
+                      <input 
+                        type="text" 
+                        name="name" 
+                        className="form-control" 
+                        value={editForm.name} 
+                        onChange={handleEditChange} 
+                        required 
+                      />
+                    </div>
+                  </div>
+
+                  <div className="mb-3">
+                    <label className="form-label fw-semibold">Descripción</label>
+                    <textarea 
+                      name="description" 
+                      rows="3" 
+                      className="form-control" 
+                      value={editForm.description} 
+                      onChange={handleEditChange} 
+                      required 
+                    />
+                  </div>
+
+                  <div className="row">
+                    <div className="col-md-6 mb-3">
+                      <label className="form-label fw-semibold">Precio ($)</label>
+                      <input 
+                        type="number" 
+                        step="0.01" 
+                        name="price" 
+                        className="form-control" 
+                        value={editForm.price} 
+                        onChange={handleEditChange} 
+                        required 
+                      />
+                    </div>
+
+                    <div className="col-md-6 mb-3">
+                      <label className="form-label fw-semibold">Stock</label>
+                      <input 
+                        type="number" 
+                        name="stock" 
+                        className="form-control" 
+                        value={editForm.stock} 
+                        onChange={handleEditChange} 
+                        required 
+                      />
+                    </div>
+                  </div>
+
+                  <div className="row">
+                    <div className="col-md-6 mb-3">
+                      <label className="form-label fw-semibold">Categoría</label>
+                      <select 
+                        name="category" 
+                        className="form-select" 
+                        value={editForm.category} 
+                        onChange={handleEditChange}
+                      >
+                        <option value="Ropa">Ropa</option>
+                        <option value="Calzado">Calzado</option>
+                        <option value="Accesorios">Accesorios</option>
+                        <option value="Tecnología">Tecnología</option>
+                        <option value="Servicios">Servicios</option>
+                        <option value="General">Otros</option>
+                      </select>
+                    </div>
+
+                    <div className="col-md-6 mb-3">
+                      <label className="form-label fw-semibold">Ubicación</label>
+                      <input 
+                        type="text" 
+                        name="location" 
+                        className="form-control" 
+                        value={editForm.location} 
+                        onChange={handleEditChange} 
+                      />
+                    </div>
+                  </div>
+                </div>
+                <div className="modal-footer border-light p-4">
+                  <button type="button" className="btn btn-light fw-semibold" onClick={() => setShowEditModal(false)}>
+                    Cancelar
+                  </button>
+                  <button type="submit" className="btn btn-primary fw-semibold px-4" disabled={saveLoading}>
+                    {saveLoading ? 'Guardando...' : 'Guardar Cambios'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default SellerDashboard;
+</file>
+
+<file path="frontend/src/services/authService.js">
+import axios from 'axios';
+import API_BASE from '../config/api';
+
+const API_URL = `${API_BASE}/auth`;
+
+const register = async (userData) => {
+  const response = await axios.post(`${API_URL}/register`, userData);
+  return response.data;
+};
+
+const login = async (userData) => {
+  const response = await axios.post(`${API_URL}/login`, userData);
+  if (response.data.token) {
+    localStorage.setItem('user', JSON.stringify(response.data));
+  }
+  return response.data;
+};
+
+const logout = () => {
+  localStorage.removeItem('user');
+};
+
+const authService = {
+  register,
+  login,
+  logout,
+};
+
+export default authService;
+</file>
+
+<file path="frontend/src/services/messageService.js">
+import axios from 'axios';
+import API_BASE from '../config/api';
+
+/**
+ * Fetches all conversations for a given user.
+ * Returns an array of objects: { id, partnerName, lastMessage, ... }
+ */
+export const getMessagesForUser = async (userId, token) => {
+  try {
+    const response = await axios.get(`${API_BASE}/messages/conversations`, {
+      headers: { Authorization: `Bearer ${token}` },
+      params: { userId },
+    });
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching messages', error);
+    throw error;
+  }
+};
+
+// Export default for backward compatibility with existing imports
+export default { getMessagesForUser };
+</file>
+
+<file path="frontend/src/services/userService.js">
+import axios from 'axios';
+import API_BASE from '../config/api';
+
+const API_URL = `${API_BASE}/users`;
+
+const getProfile = async (token) => {
+  const config = {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  };
+
+  const response = await axios.get(`${API_URL}/profile`, config);
+  return response.data;
+};
+
+const updateProfile = async (userData, token) => {
+  const config = {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  };
+
+  const response = await axios.put(`${API_URL}/profile`, userData, config);
+  return response.data;
+};
+
+const userService = {
+  getProfile,
+  updateProfile,
+};
+
+export default userService;
+</file>
+
+<file path="frontend/vite.config.js">
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
+// https://vitejs.dev/config/
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    port: 3000,
+    proxy: {
+      '/api': 'http://localhost:5000',
+      '/uploads': 'http://localhost:5000'
+    }
+  }
+})
+</file>
+
+<file path="backend/controllers/productController.js">
+const Product = require('../models/Product');
+const User = require('../models/User');
+const SellerReview = require('../models/SellerReview');
+const { Op } = require('sequelize');
+const jwt = require('jsonwebtoken');
+
+// @desc    Obtener todos los productos con filtros avanzados
+exports.getProducts = async (req, res) => {
+  const { search, category, minPrice, maxPrice, location, sellerId, status } = req.query;
+
+  try {
+    const where = {};
+
+    // Obtener usuario autenticado opcionalmente desde el token
+    let currentUser = null;
+    if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
+      try {
+        const token = req.headers.authorization.split(' ')[1];
+        if (token) {
+          const decoded = jwt.verify(token, process.env.JWT_SECRET || 'supersecretkey123');
+          currentUser = await User.findByPk(decoded.id);
+        }
+      } catch (err) {
+        // Ignorar token inválido
+      }
+    }
+
+    // Aplicar filtros de estado de validación según el rol
+    if (!currentUser || currentUser.role !== 'admin') {
+      if (currentUser && currentUser.role === 'vendedor') {
+        // Vendedor ve aprobados de todos + todos los propios
+        where[Op.or] = [
+          { approvalStatus: 'aprobado' },
+          { sellerId: currentUser.id }
+        ];
+      } else {
+        // Cliente o invitado solo ve aprobados
+        where.approvalStatus = 'aprobado';
+      }
+    } else {
+      // Admin ve todo, pero si filtra por approvalStatus lo respetamos
+      if (req.query.approvalStatus) {
+        where.approvalStatus = req.query.approvalStatus;
+      }
+    }
+
+    if (search) {
+      where[Op.or] = [
+        { name: { [Op.iLike]: `%${search}%` } },
+        { description: { [Op.iLike]: `%${search}%` } }
+      ];
+    }
+
+    if (category && category !== 'Todos') {
+      where.category = category;
+    }
+
+    if (location) {
+      where.location = { [Op.iLike]: `%${location}%` };
+    }
+
+    if (sellerId) {
+      where.sellerId = sellerId;
+    }
+
+    if (status) {
+      where.status = status;
+    }
+
+    if (minPrice || maxPrice) {
+      where.price = {};
+      if (minPrice) {
+        where.price[Op.gte] = parseFloat(minPrice);
+      }
+      if (maxPrice) {
+        where.price[Op.lte] = parseFloat(maxPrice);
+      }
+    }
+
+    const products = await Product.findAll({
+      where,
+      order: [['createdAt', 'DESC']],
+      include: [
+        {
+          model: User,
+          as: 'seller',
+          attributes: ['id', 'name', 'email', 'avatarUrl', 'location', 'createdAt']
+        }
+      ]
+    });
+
+    // Batch-load seller reputation to avoid N+1 queries
+    const sellerIds = [...new Set(products.map(p => p.sellerId).filter(Boolean))];
+    const reviewMap = {};
+    if (sellerIds.length > 0) {
+      const allReviews = await SellerReview.findAll({
+        where: { sellerId: sellerIds }
+      });
+      for (const sellerId of sellerIds) {
+        const reviews = allReviews.filter(r => r.sellerId === sellerId);
+        const avg = reviews.length > 0
+          ? parseFloat((reviews.reduce((a, r) => a + r.rating, 0) / reviews.length).toFixed(1))
+          : 0;
+        reviewMap[sellerId] = { avgRating: avg, reviewsCount: reviews.length };
+      }
+    }
+
+    // Attach reputation to each product's seller
+    const enriched = products.map(p => {
+      const plain = p.toJSON();
+      if (plain.seller && reviewMap[plain.sellerId]) {
+        plain.seller.avgRating = reviewMap[plain.sellerId].avgRating;
+        plain.seller.reviewsCount = reviewMap[plain.sellerId].reviewsCount;
+      }
+      return plain;
+    });
+
+    res.json(enriched);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+
+// @desc    Obtener un producto por ID con detalles del vendedor y su reputación
+// @route   GET /api/products/:id
+// @access  Public
+exports.getProductById = async (req, res) => {
+  try {
+    const product = await Product.findByPk(req.params.id, {
+      include: [
+        {
+          model: User,
+          as: 'seller',
+          attributes: ['id', 'name', 'email', 'avatarUrl', 'bio', 'location', 'createdAt']
+        }
+      ]
+    });
+
+    if (!product) {
+      return res.status(404).json({ error: 'Producto no encontrado' });
+    }
+
+    // Calcular reputación del vendedor (calificación promedio y comentarios)
+    const reviews = await SellerReview.findAll({
+      where: { sellerId: product.sellerId },
+      include: [
+        {
+          model: User,
+          as: 'buyer',
+          attributes: ['id', 'name', 'avatarUrl']
+        }
+      ]
+    });
+
+    let avgRating = 0;
+    if (reviews.length > 0) {
+      const sum = reviews.reduce((acc, r) => acc + r.rating, 0);
+      avgRating = parseFloat((sum / reviews.length).toFixed(1));
+    }
+
+    const response = {
+      ...product.toJSON(),
+      seller: {
+        ...product.seller.toJSON(),
+        avgRating,
+        reviewsCount: reviews.length,
+        reviews
+      }
+    };
+
+    res.json(response);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// @desc    Crear un producto (Vendedor o Admin)
+// @route   POST /api/products
+// @access  Private (Vendedor / Admin)
+exports.createProduct = async (req, res) => {
+  const { name, description, price, category, images, stock, status, location } = req.body;
+  const sellerId = req.user.id;
+  // If an image file was uploaded, use its path as imageUrl
+  const imageUrl = req.file ? `/uploads/${req.file.filename}` : undefined;
+
+  try {
+    if (req.user.role !== 'vendedor' && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'No autorizado. Solo vendedores pueden publicar productos.' });
+    }
+
+    if (!name || !price) {
+      return res.status(400).json({ error: 'El nombre y el precio son obligatorios.' });
+    }
+
+    const product = await Product.create({
+      name,
+      description,
+      price,
+      category: category || 'General',
+      imageUrl: imageUrl || req.body.imageUrl,
+      images,
+      stock: stock !== undefined ? parseInt(stock) : 1,
+      sellerId,
+      status: status || 'nuevo',
+      approvalStatus: 'pendiente',
+      location: location || req.user.location || 'No especificada'
+    });
+
+    res.status(201).json(product);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// @desc    Actualizar un producto (Dueño o Admin)
+// @route   PUT /api/products/:id
+// @access  Private
+exports.updateProduct = async (req, res) => {
+  const { name, description, price, category, imageUrl, images, stock, status, location } = req.body;
+
+  try {
+    const product = await Product.findByPk(req.params.id);
+
+    if (!product) {
+      return res.status(404).json({ error: 'Producto no encontrado' });
+    }
+
+    // Verificar si es dueño o admin
+    if (product.sellerId !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'No autorizado para editar este producto.' });
+    }
+
+    // Verificar si hay cambios críticos para regresar a pendiente
+    const isCriticalChange =
+      (name !== undefined && name !== product.name) ||
+      (description !== undefined && description !== product.description) ||
+      (price !== undefined && parseFloat(price) !== product.price) ||
+      (category !== undefined && category !== product.category);
+
+    if (isCriticalChange) {
+      product.approvalStatus = 'pendiente';
+    }
+
+    product.name = name || product.name;
+    product.description = description !== undefined ? description : product.description;
+    product.price = price !== undefined ? parseFloat(price) : product.price;
+    product.category = category || product.category;
+    product.imageUrl = imageUrl || product.imageUrl;
+    product.images = images !== undefined ? images : product.images;
+    product.stock = stock !== undefined ? parseInt(stock) : product.stock;
+    product.status = status || product.status;
+    product.location = location || product.location;
+
+    await product.save();
+    res.json(product);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// @desc    Eliminar un producto (Dueño o Admin)
+// @route   DELETE /api/products/:id
+// @access  Private
+exports.deleteProduct = async (req, res) => {
+  try {
+    const product = await Product.findByPk(req.params.id);
+
+    if (!product) {
+      return res.status(404).json({ error: 'Producto no encontrado' });
+    }
+
+    // Verificar si es dueño o admin
+    if (product.sellerId !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'No autorizado para eliminar este producto.' });
+    }
+
+    await product.destroy();
+    res.json({ message: 'Producto eliminado' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// @desc    Agregar reseña a un vendedor
+// @route   POST /api/products/seller/:sellerId/review
+// @access  Private
+exports.createSellerReview = async (req, res) => {
+  const { rating, comment } = req.body;
+  const sellerId = req.params.sellerId;
+  const buyerId = req.user.id;
+
+  try {
+    if (buyerId == sellerId) {
+      return res.status(400).json({ error: 'No puedes valorarte a ti mismo.' });
+    }
+
+    if (!rating || rating < 1 || rating > 5) {
+      return res.status(400).json({ error: 'La calificación debe ser un entero entre 1 y 5.' });
+    }
+
+    // Verificar si el vendedor existe
+    const seller = await User.findByPk(sellerId);
+    if (!seller || seller.role !== 'vendedor') {
+      return res.status(404).json({ error: 'Vendedor no encontrado.' });
+    }
+
+    // Verificar si ya tiene reseña de este comprador
+    const existingReview = await SellerReview.findOne({
+      where: { sellerId, buyerId }
+    });
+
+    if (existingReview) {
+      existingReview.rating = rating;
+      existingReview.comment = comment || existingReview.comment;
+      await existingReview.save();
+      return res.json({ message: 'Reseña actualizada', review: existingReview });
+    }
+
+    const review = await SellerReview.create({
+      sellerId,
+      buyerId,
+      rating,
+      comment
+    });
+
+    res.status(201).json(review);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// @desc    Validar producto (Aprobar o Rechazar)
+// @route   PUT /api/products/:id/validate
+// @access  Private (Admin)
+exports.validateProduct = async (req, res) => {
+  const { approvalStatus } = req.body;
+
+  try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'No autorizado. Solo administradores pueden validar productos.' });
+    }
+
+    if (!approvalStatus || !['aprobado', 'rechazado', 'pendiente'].includes(approvalStatus)) {
+      return res.status(400).json({ error: 'Estado de aprobación no válido.' });
+    }
+
+    const product = await Product.findByPk(req.params.id);
+
+    if (!product) {
+      return res.status(404).json({ error: 'Producto no encontrado' });
+    }
+
+    product.approvalStatus = approvalStatus;
+    await product.save();
+
+    res.json(product);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+</file>
+
+<file path="backend/package.json">
+{
+  "name": "cozastore-backend",
+  "version": "1.0.0",
+  "description": "Backend for COZASTORE - User Management Module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "seed": "node seed.js",
+    "test": "jest --runInBand --detectOpenHandles"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "express-validator": "^7.0.1",
+    "jsonwebtoken": "^9.0.1",
+    "multer": "^1.4.5-lts.1",
+    "mysql2": "^3.9.2",
+    "pg": "^8.21.0",
+    "pg-hstore": "^2.3.4",
+    "sequelize": "^6.37.8"
+  },
+  "devDependencies": {
+    "jest": "^30.4.2",
+    "nodemon": "^3.0.1",
+    "sqlite3": "^6.0.1",
+    "supertest": "^7.2.2"
+  }
+}
+</file>
+
+<file path="backend/server.js">
+// Forzar IPv4 en DNS antes de cualquier otro módulo (evita ENETUNREACH IPv6 en Render)
+require('dns').setDefaultResultOrder('ipv4first');
+
+require('dotenv').config();
+const express = require('express');
+const cors = require('cors');
+const { connectDB, sequelize } = require('./config/db');
+const app = express();
+
+const authRoutes = require('./routes/authRoutes');
+const userRoutes = require('./routes/userRoutes');
+const adminRoutes = require('./routes/adminRoutes');
+const productRoutes = require('./routes/productRoutes');
+const messageRoutes = require('./routes/messageRoutes');
+
+// Importar modelos para establecer relaciones
+const User = require('./models/User');
+const Product = require('./models/Product');
+const SellerReview = require('./models/SellerReview');
+const Message = require('./models/Message');
+
+// Definir Relaciones/Asociaciones
+User.hasMany(Product, { foreignKey: 'sellerId', as: 'products', onDelete: 'CASCADE' });
+Product.belongsTo(User, { foreignKey: 'sellerId', as: 'seller' });
+
+User.hasMany(SellerReview, { foreignKey: 'sellerId', as: 'sellerReviews', onDelete: 'CASCADE' });
+SellerReview.belongsTo(User, { foreignKey: 'sellerId', as: 'seller' });
+SellerReview.belongsTo(User, { foreignKey: 'buyerId', as: 'buyer' });
+
+Message.belongsTo(User, { foreignKey: 'senderId', as: 'sender' });
+Message.belongsTo(User, { foreignKey: 'receiverId', as: 'receiver' });
+Message.belongsTo(Product, { foreignKey: 'productId', as: 'product' });
+
+// Conectar a la base de datos y sincronizar modelos
+connectDB().then(() => {
+  return sequelize.sync({ alter: true });
+}).then(() => {
+  console.log('Database synced with relationships');
+}).catch(err => {
+  console.error('Failed to sync db: ' + err.message);
+});
+
+const path = require('path');
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+
+// Middlewares
+app.use(cors());
+app.use(express.json());
+
+// Rutas
+app.use('/api/auth', authRoutes);
+app.use('/api/users', userRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api/products', productRoutes);
+app.use('/api/messages', messageRoutes);
+
+// Ruta de prueba
+app.get('/', (req, res) => {
+  res.send('API de COZASTORE corriendo...');
+});
+
+const PORT = process.env.PORT || 5000;
+
+if (process.env.NODE_ENV !== 'test') {
+  app.listen(PORT, () => {
+    console.log(`Servidor ejecutándose en el puerto ${PORT} en modo ${process.env.NODE_ENV}`);
+  });
+}
+
+module.exports = app;
+</file>
+
 <file path="frontend/src/pages/AdminDashboard.jsx">
 import { useState, useEffect, useContext } from 'react';
 import { AuthContext } from '../context/AuthContext';
 import adminService from '../services/adminService';
+import { resolveImage } from '../utils/resolveImage';
 
 const AdminDashboard = () => {
   const { user, token } = useContext(AuthContext);
@@ -4869,7 +5072,7 @@ const AdminDashboard = () => {
                         <td className="px-4 py-3">
                           <div className="d-flex align-items-center gap-3">
                             <img 
-                              src={p.imageUrl || 'https://via.placeholder.com/60'} 
+                              src={resolveImage(p.imageUrl)} 
                               alt={p.name} 
                               className="rounded shadow-sm"
                               style={{ width: '50px', height: '50px', objectFit: 'cover' }} 
@@ -4949,144 +5152,11 @@ const AdminDashboard = () => {
 export default AdminDashboard;
 </file>
 
-<file path="frontend/src/pages/Register.jsx">
-import { useState, useContext } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { AuthContext } from '../context/AuthContext';
-
-const Register = () => {
-  const [formData, setFormData] = useState({
-    name: '',
-    email: '',
-    password: '',
-    passwordConfirm: '',
-    role: 'comprador',
-  });
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
-  const { register } = useContext(AuthContext);
-  const navigate = useNavigate();
-
-  const { name, email, password, passwordConfirm, role } = formData;
-
-  const onChange = (e) =>
-    setFormData({ ...formData, [e.target.name]: e.target.value });
-
-  const onSubmit = async (e) => {
-    e.preventDefault();
-    setError('');
-    
-    if (password !== passwordConfirm) {
-      return setError('Las contraseñas no coinciden');
-    }
-
-    try {
-      await register(formData);
-      setSuccess('Cuenta creada exitosamente. Redirigiendo al login...');
-      setTimeout(() => {
-        navigate('/login');
-      }, 2000);
-    } catch (err) {
-      setError(err.response?.data?.error || 'Error al registrarse');
-    }
-  };
-
-  return (
-    <div className="auth-container">
-      <div className="auth-card">
-        <h2 className="auth-title">Crear Cuenta</h2>
-        
-        {error && <div className="alert alert-error">{error}</div>}
-        {success && <div className="alert alert-success">{success}</div>}
-
-        <form onSubmit={onSubmit}>
-          <div className="form-group">
-            <label className="form-label">Nombre Completo</label>
-            <input
-              type="text"
-              className="form-input"
-              name="name"
-              value={name}
-              onChange={onChange}
-              required
-              placeholder="Ej: Juan Pérez"
-            />
-          </div>
-
-          <div className="form-group">
-            <label className="form-label">Email</label>
-            <input
-              type="email"
-              className="form-input"
-              name="email"
-              value={email}
-              onChange={onChange}
-              required
-              placeholder="tu@email.com"
-            />
-          </div>
-
-          <div className="form-group">
-            <label className="form-label">Contraseña</label>
-            <input
-              type="password"
-              className="form-input"
-              name="password"
-              value={password}
-              onChange={onChange}
-              required
-              placeholder="Mínimo 6 caracteres"
-              minLength={6}
-            />
-          </div>
-
-          <div className="form-group">
-            <label className="form-label">Confirmar Contraseña</label>
-            <input
-              type="password"
-              className="form-input"
-              name="passwordConfirm"
-              value={passwordConfirm}
-              onChange={onChange}
-              required
-              placeholder="Repite tu contraseña"
-            />
-          </div>
-
-          <div className="form-group">
-            <label className="form-label">Tipo de Cuenta</label>
-            <select
-              className="form-input"
-              name="role"
-              value={role}
-              onChange={onChange}
-              style={{ padding: '0.6rem', border: '1px solid #ddd', borderRadius: '4px', background: '#fff' }}
-            >
-              <option value="comprador">Demandante (Comprar productos/servicios)</option>
-              <option value="vendedor">Ofertante (Publicar productos/servicios)</option>
-            </select>
-          </div>
-
-          <button type="submit" className="btn-primary">
-            Registrarse
-          </button>
-        </form>
-
-        <div className="auth-footer">
-          ¿Ya tienes cuenta? <Link to="/login" className="auth-link">Inicia Sesión</Link>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-export default Register;
-</file>
-
 <file path="frontend/src/services/productService.js">
 import axios from 'axios';
+import API_BASE from '../config/api';
 
-const API_URL = 'http://localhost:5000/api/products';
+const API_URL = `${API_BASE}/products`;
 
 const getProducts = async (token) => {
   let headers = {};
@@ -5144,8 +5214,9 @@ export default productService;
 
 <file path="frontend/src/services/adminService.js">
 import axios from 'axios';
+import API_BASE from '../config/api';
 
-const API_URL = 'http://localhost:5000/api';
+const API_URL = API_BASE;
 
 // Users
 const getUsers = async (token) => {
@@ -5207,6 +5278,58 @@ const adminService = {
 };
 
 export default adminService;
+</file>
+
+<file path="backend/config/db.js">
+const { Sequelize } = require('sequelize');
+
+let sequelize;
+
+if (process.env.NODE_ENV === 'test') {
+  sequelize = new Sequelize({
+    dialect: 'sqlite',
+    storage: ':memory:',
+    logging: false
+  });
+} else if (process.env.DATABASE_URL) {
+  // Producción: usar connection string del pooler de Supabase (tiene IPv4)
+  sequelize = new Sequelize(process.env.DATABASE_URL, {
+    dialect: 'postgres',
+    logging: false,
+    dialectOptions: {
+      ssl: { require: true, rejectUnauthorized: false }
+    }
+  });
+} else {
+  // Desarrollo local: variables individuales
+  sequelize = new Sequelize(process.env.DB_NAME, process.env.DB_USER, process.env.DB_PASSWORD, {
+    host: process.env.DB_HOST,
+    port: process.env.DB_PORT || 5432,
+    dialect: 'postgres',
+    logging: false,
+    dialectOptions: {
+      ssl: { require: true, rejectUnauthorized: false }
+    }
+  });
+}
+
+const connectDB = async () => {
+  try {
+    await sequelize.authenticate();
+    if (process.env.NODE_ENV === 'test') {
+      console.log('SQLite Test Database Connected');
+    } else {
+      console.log('PostgreSQL Database Connected (Supabase)');
+    }
+  } catch (error) {
+    console.error(`Error connecting to Database: ${error.message}`);
+    if (process.env.NODE_ENV !== 'test') {
+      process.exit(1);
+    }
+  }
+};
+
+module.exports = { sequelize, connectDB };
 </file>
 
 </files>

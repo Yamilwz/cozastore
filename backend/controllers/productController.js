@@ -6,7 +6,7 @@ const jwt = require('jsonwebtoken');
 
 // @desc    Obtener todos los productos con filtros avanzados
 exports.getProducts = async (req, res) => {
-  const { search, category, minPrice, maxPrice, location, sellerId, status } = req.query;
+  const { search, category, minPrice, maxPrice, location, sellerId, status, sort } = req.query;
 
   try {
     const where = {};
@@ -77,9 +77,16 @@ exports.getProducts = async (req, res) => {
       }
     }
 
+    let order = [['createdAt', 'DESC']];
+    if (sort === 'requested') {
+      order = [['requestCount', 'DESC'], ['createdAt', 'DESC']];
+    } else if (sort === 'recent') {
+      order = [['createdAt', 'DESC']];
+    }
+
     const products = await Product.findAll({
       where,
-      order: [['createdAt', 'DESC']],
+      order,
       include: [
         {
           model: User,
@@ -106,14 +113,25 @@ exports.getProducts = async (req, res) => {
     }
 
     // Attach reputation to each product's seller
-    const enriched = products.map(p => {
+    let enriched = products.map(p => {
       const plain = p.toJSON();
       if (plain.seller && reviewMap[plain.sellerId]) {
         plain.seller.avgRating = reviewMap[plain.sellerId].avgRating;
         plain.seller.reviewsCount = reviewMap[plain.sellerId].reviewsCount;
+      } else if (plain.seller) {
+        plain.seller.avgRating = 0;
+        plain.seller.reviewsCount = 0;
       }
       return plain;
     });
+
+    if (sort === 'rated') {
+      enriched = enriched.sort((a, b) => {
+        const ratingA = a.seller ? a.seller.avgRating : 0;
+        const ratingB = b.seller ? b.seller.avgRating : 0;
+        return ratingB - ratingA;
+      });
+    }
 
     res.json(enriched);
   } catch (error) {

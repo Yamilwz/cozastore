@@ -43,6 +43,7 @@ function App() {
             <Route element={<ProtectedRoute />}>
               <Route path="/profile" element={<Profile />} />
               <Route path="/chat" element={<Chat />} />
+              <Route path="/chat/:userId" element={<Chat />} />
             </Route>
             <Route element={<ProtectedRoute adminOnly={true} />}>
               <Route path="/admin" element={<AdminDashboard />} />

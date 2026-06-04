@@ -12,12 +12,14 @@ const userRoutes = require('./routes/userRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const productRoutes = require('./routes/productRoutes');
 const messageRoutes = require('./routes/messageRoutes');
+const requestRoutes = require('./routes/requestRoutes');
 
 // Importar modelos para establecer relaciones
 const User = require('./models/User');
 const Product = require('./models/Product');
 const SellerReview = require('./models/SellerReview');
 const Message = require('./models/Message');
+const Request = require('./models/Request');
 
 // Definir Relaciones/Asociaciones
 User.hasMany(Product, { foreignKey: 'sellerId', as: 'products', onDelete: 'CASCADE' });
@@ -30,6 +32,10 @@ SellerReview.belongsTo(User, { foreignKey: 'buyerId', as: 'buyer' });
 Message.belongsTo(User, { foreignKey: 'senderId', as: 'sender' });
 Message.belongsTo(User, { foreignKey: 'receiverId', as: 'receiver' });
 Message.belongsTo(Product, { foreignKey: 'productId', as: 'product' });
+
+Request.belongsTo(Product, { foreignKey: 'productId', as: 'product' });
+Request.belongsTo(User, { foreignKey: 'requesterId', as: 'requester' });
+Request.belongsTo(User, { foreignKey: 'sellerId', as: 'seller' });
 
 // Conectar a la base de datos y sincronizar modelos
 connectDB().then(() => {
@@ -54,6 +60,7 @@ app.use('/api/users', userRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/messages', messageRoutes);
+app.use('/api/requests', requestRoutes);
 
 // Ruta de prueba
 app.get('/', (req, res) => {

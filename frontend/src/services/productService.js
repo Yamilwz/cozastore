@@ -3,7 +3,7 @@ import API_BASE from '../config/api';
 
 const API_URL = `${API_BASE}/products`;
 
-const getProducts = async (token) => {
+const getProducts = async (token, sort = 'recent') => {
   let headers = {};
   if (token) {
     headers = { Authorization: `Bearer ${token}` };
@@ -13,7 +13,7 @@ const getProducts = async (token) => {
       headers = { Authorization: `Bearer ${storedUser.token}` };
     }
   }
-  const response = await axios.get(API_URL, { headers });
+  const response = await axios.get(`${API_URL}?sort=${sort}`, { headers });
   return response.data;
 };
 

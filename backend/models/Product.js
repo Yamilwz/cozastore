@@ -27,6 +27,10 @@ const Product = sequelize.define('Product', {
     type: DataTypes.INTEGER,
     defaultValue: 1,
   },
+  requestCount: {
+    type: DataTypes.INTEGER,
+    defaultValue: 0,
+  },
   sellerId: {
     type: DataTypes.INTEGER,
     allowNull: false

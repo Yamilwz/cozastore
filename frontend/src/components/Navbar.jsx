@@ -21,20 +21,26 @@ const Navbar = () => {
         <li>
           <Link to="/" className="nav-link">Inicio (Marketplace)</Link>
         </li>
-        {user && (user.role === 'vendedor' || user.role === 'admin') && (
+        {/* Vendedor: Publicar Producto */}
+        {user && user.role === 'vendedor' && (
           <li>
-            <Link to="/publish" className="nav-link" style={{ color: 'var(--primary)', fontWeight: '600' }}>Publicar Producto</Link>
+            <Link to="/publish" className="nav-link" style={{ color: 'var(--primary)', fontWeight: '600' }}>
+              Publicar Producto
+            </Link>
           </li>
         )}
-        {user && (
-          <li>
-            <Link to="/chat" className="nav-link">💬 Mensajes</Link>
-          </li>
-        )}
+        {/* Admin: ir al panel + publicar producto */}
         {user && user.role === 'admin' && (
-          <li>
-            <Link to="/admin" className="nav-link admin-link" style={{ color: '#ff4d4d', fontWeight: 'bold' }}>Admin</Link>
-          </li>
+          <>
+            <li>
+              <Link to="/publish" className="nav-link" style={{ color: 'var(--primary)', fontWeight: '600' }}>
+                Publicar Producto
+              </Link>
+            </li>
+            <li>
+              <Link to="/admin" className="nav-link admin-link" style={{ color: '#ff4d4d', fontWeight: 'bold' }}>Admin</Link>
+            </li>
+          </>
         )}
         {user ? (
           <>

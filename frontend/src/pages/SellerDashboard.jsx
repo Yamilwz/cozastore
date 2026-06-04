@@ -304,9 +304,9 @@ const SellerDashboard = () => {
 
       {/* ─── TAB 3: CHAT ─── */}
       {activeTab === 'chat' && (
-        <div className="row g-0 border rounded-3 overflow-hidden shadow" style={{ height: '65vh' }}>
+        <div className="chat-container row g-0 border rounded-3 overflow-hidden shadow">
           {/* Conversation sidebar */}
-          <div className="col-md-4 border-end bg-light d-flex flex-column" style={{ overflowY: 'auto' }}>
+          <div className="chat-sidebar col-md-4 border-end bg-light d-flex flex-column">
             <div className="p-3 border-bottom bg-white text-muted small fw-semibold text-uppercase">Conversaciones</div>
             {chatLoading ? (
               <div className="p-4 text-center"><div className="spinner-border spinner-border-sm text-primary" /></div>
@@ -335,7 +335,7 @@ const SellerDashboard = () => {
           </div>
 
           {/* Messages panel */}
-          <div className="col-md-8 d-flex flex-column bg-white">
+          <div className="chat-main col-md-8 bg-white">
             {!selectedConv ? (
               <div className="flex-grow-1 d-flex flex-column align-items-center justify-content-center text-muted">
                 <span style={{ fontSize: '3rem' }}>💬</span>

@@ -809,6 +809,34 @@ body {
   font-weight: 600;
 }
 
+/* Chat Layout */
+.chat-container {
+  height: 65vh;
+}
+
+.chat-sidebar {
+  overflow-y: auto;
+}
+
+.chat-main {
+  display: flex;
+  flex-direction: column;
+}
+
+@media (max-width: 767px) {
+  .chat-container {
+    height: 75vh;
+  }
+  .chat-sidebar {
+    height: 35%;
+    border-bottom: 1px solid #dee2e6;
+    border-right: none !important;
+  }
+  .chat-main {
+    height: 65%;
+  }
+}
+
 /* ── Tablet (max 991px) ── */
 @media (max-width: 991px) {
   .navbar {

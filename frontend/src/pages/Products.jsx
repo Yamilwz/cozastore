@@ -561,9 +561,9 @@ const Products = () => {
 
         {/* ─── TAB 3: EMBEDDED CHAT ─── */}
         {activeTab === 'chat' && (
-          <div className="row g-0 border rounded-3 overflow-hidden shadow" style={{ height: '65vh' }}>
+          <div className="chat-container row g-0 border rounded-3 overflow-hidden shadow">
             {/* Sidebar Conversations */}
-            <div className="col-md-4 border-end bg-light d-flex flex-column" style={{ overflowY: 'auto' }}>
+            <div className="chat-sidebar col-md-4 border-end bg-light d-flex flex-column">
               <div className="p-3 border-bottom bg-white fw-semibold text-muted small text-uppercase">
                 Conversaciones
               </div>
@@ -604,7 +604,7 @@ const Products = () => {
             </div>
 
             {/* Chat Messages Panel */}
-            <div className="col-md-8 d-flex flex-column bg-white">
+            <div className="chat-main col-md-8 bg-white">
               {!selectedChatConv ? (
                 <div className="flex-grow-1 d-flex flex-column align-items-center justify-content-center text-muted">
                   <span style={{ fontSize: '3rem' }}>💬</span>

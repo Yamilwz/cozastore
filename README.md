@@ -53,6 +53,18 @@ El sistema posee una arquitectura basada en **roles de usuario**, cada uno con d
 - Sistema de mensajería para la comunicación directa entre compradores y vendedores (`/chat`).
 - Lista de conversaciones activas e historial de mensajes.
 
+## 🔒 Seguridad Avanzada
+
+Para garantizar la protección de los usuarios y la integridad de la plataforma, se han implementado medidas rigurosas de seguridad tanto en el Frontend como en el Backend:
+
+- **Protección contra DDoS y Fuerza Bruta**: Límite estricto de peticiones (Rate Limiting) de 100 requests por IP cada 15 minutos en la API.
+- **Cabeceras de Seguridad (Helmet)**: Ocultamiento de información del servidor y configuración de múltiples cabeceras defensivas HTTP.
+- **Prevención Cross-Site Scripting (XSS)**: Sanitización automática de datos de entrada (`xss-clean`) en el backend, y una política estricta de **Content-Security-Policy (CSP)** en el frontend.
+- **Protección contra HTTP Parameter Pollution (HPP)**: Prevención de inyección o evasión mediante contaminación de parámetros.
+- **Protección contra Clickjacking y MIME-Sniffing**: Bloqueo de incrustación mediante iframes (`X-Frame-Options: DENY`) y obligatoriedad de tipos MIME (`X-Content-Type-Options: nosniff`).
+- **Comunicaciones Cifradas Estrictas**: Directivas **HSTS (Strict-Transport-Security)** para forzar conexiones HTTPS seguras.
+- **Límite de Tamaño de Petición**: Restricción del body de JSON a 10kb para mitigar ataques de denegación de servicio por sobrecarga.
+
 ## 🛠 Instalación y Configuración Local
 
 ### Requisitos Previos

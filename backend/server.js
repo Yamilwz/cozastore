@@ -4,6 +4,10 @@ require('dns').setDefaultResultOrder('ipv4first');
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
+const xss = require('xss-clean');
+const hpp = require('hpp');
 const { connectDB, sequelize } = require('./config/db');
 const app = express();
 
@@ -51,8 +55,26 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 
 // Middlewares
+// 1. Helmet: Configura cabeceras HTTP de seguridad
+app.use(helmet());
+app.use(helmet.crossOriginResourcePolicy({ policy: "cross-origin" }));
+
+// 2. Rate Limiting: Prevenir ataques de fuerza bruta y DDoS
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutos
+  max: 100, // 100 peticiones por IP
+  message: 'Demasiadas peticiones desde esta IP, por favor intenta de nuevo en 15 minutos.'
+});
+app.use('/api', limiter);
+
+// 3. XSS Clean: Prevenir inyecciones XSS en el body o query
+app.use(xss());
+
+// 4. HPP: Prevenir ataques de contaminación de parámetros HTTP (HTTP Parameter Pollution)
+app.use(hpp());
+
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10kb' })); // Limitar tamaño de body para evitar ataques de sobrecarga
 
 // Rutas
 app.use('/api/auth', authRoutes);

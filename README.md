@@ -64,6 +64,7 @@ Para garantizar la protección de los usuarios y la integridad de la plataforma,
 - **Protección contra Clickjacking y MIME-Sniffing**: Bloqueo de incrustación mediante iframes (`X-Frame-Options: DENY`) y obligatoriedad de tipos MIME (`X-Content-Type-Options: nosniff`).
 - **Comunicaciones Cifradas Estrictas**: Directivas **HSTS (Strict-Transport-Security)** para forzar conexiones HTTPS seguras.
 - **Límite de Tamaño de Petición**: Restricción del body de JSON a 10kb para mitigar ataques de denegación de servicio por sobrecarga.
+- **Guardián de Rutas Estricto (SPA Security)**: Verificación activa criptográfica del JWT (JSON Web Token) contra el backend al intentar acceder directamente a URLs protegidas (ej. `/seller`), previniendo manipulaciones maliciosas del `localStorage` en el navegador.
 
 ## 🛠 Instalación y Configuración Local
 

@@ -9,12 +9,24 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const storedUser = JSON.parse(localStorage.getItem('user'));
-    if (storedUser) {
-      setUser(storedUser.user);
-      setToken(storedUser.token);
-    }
-    setLoading(false);
+    const checkAuth = async () => {
+      const storedUser = JSON.parse(localStorage.getItem('user'));
+      if (storedUser && storedUser.token) {
+        try {
+          // Verify token validity against backend to prevent direct URL access via local storage tampering
+          await authService.verify(storedUser.token);
+          setUser(storedUser.user);
+          setToken(storedUser.token);
+        } catch (error) {
+          console.error("Autenticación fallida. Token inválido o expirado.");
+          localStorage.removeItem('user');
+          setUser(null);
+          setToken(null);
+        }
+      }
+      setLoading(false);
+    };
+    checkAuth();
   }, []);
 
   const login = async (userData) => {

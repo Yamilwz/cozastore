@@ -20,10 +20,18 @@ const logout = () => {
   localStorage.removeItem('user');
 };
 
+const verify = async (token) => {
+  const response = await axios.get(`${API_BASE}/users/profile`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  return response.data;
+};
+
 const authService = {
   register,
   login,
   logout,
+  verify,
 };
 
 export default authService;
